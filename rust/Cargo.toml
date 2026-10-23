@@ -23,6 +23,8 @@ akeeper-proto = { path = "crates/akeeper-proto" }
 akeeper-engine = { path = "crates/akeeper-engine" }
 mio = { version = "1.2", features = ["os-poll", "os-ext"] }
 libc = "0.2"
+fst = "0.4"
+getrandom = "0.3"
 
 [profile.release]
 lto = "fat"

@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use akeeper_proto::ip::{self, IpPacket, ParseError};
 
-/// Indices stables : ils sont exposés tels quels à Java via JNI.
+/// Indices stables : ils sont exposés tels quels à Java via JNI (`NativeEngine.Counter`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Counter {
@@ -12,7 +12,12 @@ pub enum Counter {
     Tcp = 3,
     Udp = 4,
     Icmp = 5,
+    DnsQueries = 6,
+    DnsBlocked = 7,
+    DnsUpstreamFailures = 8,
 }
+
+const COUNTERS: usize = 9;
 
 impl Counter {
     pub fn from_index(index: i32) -> Option<Self> {
@@ -23,6 +28,9 @@ impl Counter {
             3 => Self::Tcp,
             4 => Self::Udp,
             5 => Self::Icmp,
+            6 => Self::DnsQueries,
+            7 => Self::DnsBlocked,
+            8 => Self::DnsUpstreamFailures,
             _ => return None,
         })
     }
@@ -31,7 +39,7 @@ impl Counter {
 /// Écrit par le seul thread moteur, lu par n'importe quel thread : `Relaxed` suffit, aucun ordre n'est requis entre compteurs.
 #[derive(Debug, Default)]
 pub struct Stats {
-    counters: [AtomicU64; 6],
+    counters: [AtomicU64; COUNTERS],
 }
 
 impl Stats {
@@ -41,7 +49,7 @@ impl Stats {
             .map_or(0, |c| c.load(Ordering::Relaxed))
     }
 
-    pub(crate) fn record(&self, parsed: Result<IpPacket<'_>, ParseError>, len: usize) {
+    pub(crate) fn record(&self, parsed: &Result<IpPacket<'_>, ParseError>, len: usize) {
         self.add(Counter::Packets, 1);
         self.add(Counter::Bytes, len as u64);
         match parsed {
@@ -55,7 +63,7 @@ impl Stats {
         }
     }
 
-    fn add(&self, counter: Counter, value: u64) {
+    pub(crate) fn add(&self, counter: Counter, value: u64) {
         if let Some(c) = self.counters.get(counter as usize) {
             c.fetch_add(value, Ordering::Relaxed);
         }

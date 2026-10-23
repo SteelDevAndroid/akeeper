@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [packet]
+        target: [packet, dns, transport]
     defaults:
       run:
         working-directory: rust

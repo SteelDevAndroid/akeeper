@@ -1,5 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use crate::checksum;
+
 pub const PROTO_ICMP: u8 = 1;
 pub const PROTO_TCP: u8 = 6;
 pub const PROTO_UDP: u8 = 17;
@@ -85,6 +87,53 @@ fn parse_v6(buf: &[u8]) -> Result<IpPacket<'_>, ParseError> {
             .get(IPV6_HEADER..end)
             .ok_or(ParseError::BadTotalLength)?,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildError {
+    FamilyMismatch,
+    TooLarge,
+}
+
+/// Encapsule un segment L4 déjà sommé dans un en-tête IP ; `out` est vidé au préalable.
+pub fn build(
+    src: IpAddr,
+    dst: IpAddr,
+    protocol: u8,
+    segment: &[u8],
+    out: &mut Vec<u8>,
+) -> Result<(), BuildError> {
+    out.clear();
+    match (src, dst) {
+        (IpAddr::V4(s), IpAddr::V4(d)) => {
+            let total =
+                u16::try_from(IPV4_MIN_HEADER + segment.len()).map_err(|_| BuildError::TooLarge)?;
+            out.extend_from_slice(&[0x45, 0]);
+            out.extend_from_slice(&total.to_be_bytes());
+            // Identification nulle + DF : jamais fragmenté par nous.
+            out.extend_from_slice(&[0, 0, 0x40, 0, 64, protocol, 0, 0]);
+            out.extend_from_slice(&s.octets());
+            out.extend_from_slice(&d.octets());
+            let sum = checksum::finish(checksum::add(
+                0,
+                out.get(..IPV4_MIN_HEADER).unwrap_or_default(),
+            ));
+            if let Some(slot) = out.get_mut(10..12) {
+                slot.copy_from_slice(&sum.to_be_bytes());
+            }
+        }
+        (IpAddr::V6(s), IpAddr::V6(d)) => {
+            let len = u16::try_from(segment.len()).map_err(|_| BuildError::TooLarge)?;
+            out.extend_from_slice(&[0x60, 0, 0, 0]);
+            out.extend_from_slice(&len.to_be_bytes());
+            out.extend_from_slice(&[protocol, 64]);
+            out.extend_from_slice(&s.octets());
+            out.extend_from_slice(&d.octets());
+        }
+        _ => return Err(BuildError::FamilyMismatch),
+    }
+    out.extend_from_slice(segment);
+    Ok(())
 }
 
 fn byte(buf: &[u8], at: usize) -> Result<u8, ParseError> {
