@@ -8,12 +8,12 @@
 |---|---|---|---|
 | Publicité et traqueurs | HaGeZi Multi LIGHT (défaut), NORMAL (option « renforcé ») | P0 | **Retenue** |
 | Blocage généraliste | StevenBlack Unified Hosts | Comparaison | **Écartée** : licence non commerciale d'une sous-source, sémantique « hôte exact » |
-| Malware | URLhaus (abuse.ch) | P0 | **Bloquée** : autorisation écrite d'abuse.ch / Spamhaus requise avant toute intégration |
+| Malware | URLhaus (abuse.ch) | P0 | **Retenue** : accord d'abuse.ch annoncé par le porteur le 23 octobre 2026 ; voir les conditions d'intégration au §3 |
 | Hameçonnage | Phishing Army | P1 | **Retenue sous réserve** de la revue des conditions des 9 sources amont |
 
 **Profil par défaut décidé : HaGeZi LIGHT + Phishing Army** (2,4 Mo de FST, 225 235 domaines). NORMAL reste une option « renforcé ».
 
-Le P0 « malware » n'a donc pas encore de source utilisable. HaGeZi NORMAL déclare couvrir aussi malware et hameçonnage : c'est le palliatif tant qu'URLhaus n'est pas autorisé, sans équivalence garantie.
+La catégorie « Sites malveillants » (URLhaus) est elle aussi activée par défaut, puisqu'elle est P0.
 
 ## 2. Mesures
 
@@ -55,14 +55,21 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 - **Sémantique** : c'est un fichier hosts, où chaque entrée vise un hôte exact. Avec la règle « sous-domaines inclus » du moteur, chaque entrée bloquerait plus large que prévu, d'où plus de faux positifs.
 - **Apport** : seuls 21 à 27 % de ses domaines sont déjà couverts par HaGeZi. Il apporterait donc environ 52 000 à 56 000 domaines, mais la licence suffit à l'écarter d'un bundle redistribué.
 
-### URLhaus (P0, bloquée)
+### URLhaus (P0, retenue après accord)
 
 - **Accès** : le fichier hosts public (`/downloads/hostfile/`) répond **HTTP 410**. Tout export demande désormais une Auth-Key nominative.
 - **Conditions d'abuse.ch** (version du 21 octobre 2026) :
   - usage gratuit réservé aux fins non lucratives, dans les limites de volume ;
   - usage commercial ou à but lucratif soumis à un abonnement géré par Spamhaus ;
   - interdiction de créer des œuvres dérivées des plateformes sans accord exprès.
-- **Conséquence** : rediffuser les domaines d'URLhaus dans un bundle signé envoyé à chaque appareil exige un **accord écrit**, même pour une app gratuite. Embarquer la clé d'API dans l'app est exclu.
+- **Conséquence** : rediffuser les domaines d'URLhaus dans un bundle signé envoyé à chaque appareil exige un **accord écrit**, même pour une app gratuite.
+- **Accord** : annoncé par le porteur du projet le 23 octobre 2026. Il faut archiver l'écrit (date, interlocuteur, périmètre : rediffusion en bundle signé, nombre d'appareils, usage commercial ou non) avec les documents du projet, hors dépôt public. Si le périmètre accordé est plus étroit que l'usage prévu, cette évaluation doit être revue.
+- **Intégration, côté serveur uniquement** :
+  - **Clé d'API** : l'Auth-Key reste un secret du pipeline. Elle n'apparaît jamais dans l'app, dans le bundle ni dans le dépôt.
+  - **Rythme** : un téléchargement toutes les 5 minutes au plus, comme le demande abuse.ch. En pratique, un par construction de bundle.
+  - **Périmètre** : seules les URL au statut « online » sont retenues. On garde le nom d'hôte, sans les adresses IP, qu'un filtre DNS ne peut pas bloquer (le filtrage IP par flux viendra en J3).
+  - **Faux positifs** : URLhaus signale des URL, pas des domaines. Une URL malveillante hébergée sur une plateforme légitime (forges de code, stockage cloud, raccourcisseurs) ne doit pas faire bloquer tout l'hôte. Le pipeline exclut donc les hôtes d'un classement de popularité (Tranco) et des plateformes mutualisées, comme le fait Phishing Army.
+  - **Volume** : il n'a pas été mesuré, l'export exigeant la clé. Il le sera à la première construction.
 - **Action** : demander l'autorisation à abuse.ch / Spamhaus en décrivant l'usage (agrégation côté serveur, rediffusion en bundle signé, volume d'appareils).
 
 ### Phishing Army (P1, sous réserve)
@@ -76,7 +83,7 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 ## 4. Conséquences sur la conception
 
 1. **Construire le FST côté serveur.** La construction prend de 0,2 à 0,7 s en CI, donc nettement plus sur un téléphone, et la liste texte est 2 à 4 fois plus grosse que le FST. Le bundle signé (J5) transporte donc des FST déjà construits, un par catégorie, que le moteur charge sans les reconstruire. Le fichier texte de J1 reste réservé à la liste personnelle, qui est courte.
-2. **Un FST par catégorie** : `ads_trackers` (HaGeZi LIGHT ou NORMAL), `phishing` (Phishing Army) et `malware` (URLhaus, quand l'accord existe). Les interrupteurs de R2 activent ou désactivent un FST sans rien reconstruire.
+2. **Un FST par catégorie** : `ads_trackers` (HaGeZi LIGHT ou NORMAL), `phishing` (Phishing Army) et `malware` (URLhaus). Les interrupteurs de R2 activent ou désactivent un FST sans rien reconstruire.
 3. **Ordre d'évaluation** : exceptions personnelles, puis domaines bloqués personnels, puis catégories actives. Une exception gagne toujours.
 4. **Écran R2** : remplacer « Publicités » + « Traqueurs » par « Publicités et traqueurs ». Retirer « Contenus adultes » tant qu'aucune source n'est choisie, ajouter « Hameçonnage ». Proposer LIGHT ou NORMAL (« standard » / « renforcé »).
 5. **Attribution** : l'écran « Licences » (R1) liste chaque source, sa licence et son lien. Le bundle porte ces métadonnées pour que l'écran suive les sources effectivement incluses.
@@ -86,7 +93,7 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 
 | # | Action | Responsable |
 |---|---|---|
-| 1 | Demande d'autorisation écrite pour URLhaus (abuse.ch / Spamhaus) | Porteur du projet |
+| 1 | Autorisation URLhaus — **obtenue selon le porteur** ; archiver l'écrit et son périmètre | Porteur du projet |
 | 2 | Revue des conditions des 9 sources de Phishing Army (redistribution, attribution) — **acceptée**, à mener avant la première diffusion | Porteur du projet |
 | 3 | Profil par défaut — **décidé : LIGHT + Phishing Army** | Porteur du projet |
 | 4 | Pipeline serveur : téléchargement, normalisation, FST par catégorie, signature Ed25519 (J5) | Développement |

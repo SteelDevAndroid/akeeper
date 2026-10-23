@@ -202,7 +202,7 @@ Quand la **Protection avancée Android** est active, une bannière s'affiche en 
 
 ### R2 — Listes de blocage
 
-- Catégories avec interrupteur : Publicités et traqueurs (niveau « standard » / « renforcé ») · Hameçonnage · Sites malveillants (dès qu'une source est autorisée). Par défaut, « Publicités et traqueurs » en niveau standard (HaGeZi LIGHT) et « Hameçonnage » (Phishing Army) sont activés. Sources et licences : `docs/listes-de-blocage.md`.
+- Catégories avec interrupteur : Publicités et traqueurs (niveau « standard » / « renforcé ») · Hameçonnage · Sites malveillants. Par défaut, les trois sont activés : « Publicités et traqueurs » en niveau standard (HaGeZi LIGHT), « Hameçonnage » (Phishing Army) et « Sites malveillants » (URLhaus). Sources et licences : `docs/listes-de-blocage.md`.
 - **Contournement DNS** : toujours actif, sans interrupteur, avec la mention « Empêche les apps d'échapper au filtrage ». Le désactiver viderait toutes les autres règles de leur sens.
 - **Exceptions personnelles** : domaines toujours autorisés, ajout manuel ou depuis A5.
 - **Domaines bloqués personnels** : ajout manuel ou depuis A5.
