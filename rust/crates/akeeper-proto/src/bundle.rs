@@ -129,16 +129,17 @@ fn sections(mut payload: &[u8]) -> Result<Vec<Section<'_>>, BundleError> {
 
 /// Plages `(préfixe, adresse IPv6)` d'une section `CIDRS`. Un préfixe > 128 rend la section invalide.
 pub fn cidrs(data: &[u8]) -> Result<Vec<(u8, [u8; 16])>, BundleError> {
-    if !data.len().is_multiple_of(CIDR_RECORD) {
+    let (records, rest) = data.as_chunks::<CIDR_RECORD>();
+    if !rest.is_empty() {
         return Err(BundleError::Malformed);
     }
-    data.chunks_exact(CIDR_RECORD)
-        .map(|record| {
-            let (&prefix, addr) = record.split_first().ok_or(BundleError::Malformed)?;
-            if prefix > 128 {
+    records
+        .iter()
+        .map(|[prefix, addr @ ..]| {
+            if *prefix > 128 {
                 return Err(BundleError::Malformed);
             }
-            Ok((prefix, addr.try_into().map_err(|_| BundleError::Malformed)?))
+            Ok((*prefix, *addr))
         })
         .collect()
 }

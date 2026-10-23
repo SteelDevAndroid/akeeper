@@ -76,11 +76,11 @@ fn build_command(args: &[String]) -> Result<(), String> {
     let mut out = None;
     let mut created = None;
     let mut sources = Sources::default();
-    let mut pairs = args.chunks_exact(2);
-    for pair in &mut pairs {
-        let [flag, value] = pair else {
-            return Err(USAGE.into());
-        };
+    let (pairs, rest) = args.as_chunks::<2>();
+    if !rest.is_empty() {
+        return Err(USAGE.into());
+    }
+    for [flag, value] in pairs {
         let text = || fs::read_to_string(value).map_err(|e| format!("{value} : {e}"));
         match flag.as_str() {
             "--seed" => seed = Some(read_seed(value)?),
@@ -96,9 +96,6 @@ fn build_command(args: &[String]) -> Result<(), String> {
             "--notice" => sources.notice = Some(text()?),
             _ => return Err(USAGE.into()),
         }
-    }
-    if !pairs.remainder().is_empty() {
-        return Err(USAGE.into());
     }
     let (Some(seed), Some(key_id), Some(version), Some(out)) = (seed, key_id, version, out) else {
         return Err(USAGE.into());
