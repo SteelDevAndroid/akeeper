@@ -5,3 +5,7 @@ plugins {
 android {
     namespace = "com.akeeper.vpn"
 }
+
+dependencies {
+    implementation(project(":engine"))
+}
