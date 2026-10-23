@@ -11,6 +11,8 @@
 | Malware | URLhaus (abuse.ch) | P0 | **Bloquée** : autorisation écrite d'abuse.ch / Spamhaus requise avant toute intégration |
 | Hameçonnage | Phishing Army | P1 | **Retenue sous réserve** de la revue des conditions des 9 sources amont |
 
+**Profil par défaut décidé : HaGeZi LIGHT + Phishing Army** (2,4 Mo de FST, 225 235 domaines). NORMAL reste une option « renforcé ».
+
 Le P0 « malware » n'a donc pas encore de source utilisable. HaGeZi NORMAL déclare couvrir aussi malware et hameçonnage : c'est le palliatif tant qu'URLhaus n'est pas autorisé, sans équivalence garantie.
 
 ## 2. Mesures
@@ -85,8 +87,8 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 | # | Action | Responsable |
 |---|---|---|
 | 1 | Demande d'autorisation écrite pour URLhaus (abuse.ch / Spamhaus) | Porteur du projet |
-| 2 | Revue des conditions des 9 sources de Phishing Army (redistribution, attribution) | Porteur du projet |
-| 3 | Valider le profil par défaut : LIGHT seul, ou LIGHT + Phishing Army | Porteur du projet |
+| 2 | Revue des conditions des 9 sources de Phishing Army (redistribution, attribution) — **acceptée**, à mener avant la première diffusion | Porteur du projet |
+| 3 | Profil par défaut — **décidé : LIGHT + Phishing Army** | Porteur du projet |
 | 4 | Pipeline serveur : téléchargement, normalisation, FST par catégorie, signature Ed25519 (J5) | Développement |
 | 5 | Mettre à jour R2 et R1 selon §4 | Développement |
 
