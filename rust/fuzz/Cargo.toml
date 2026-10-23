@@ -1,0 +1,22 @@
+[package]
+name = "akeeper-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Espace de travail séparé : libfuzzer-sys exige nightly, le workspace principal reste sur stable.
+[workspace]
+
+[dependencies]
+akeeper-proto = { path = "../crates/akeeper-proto" }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "packet"
+path = "fuzz_targets/packet.rs"
+test = false
+doc = false
+bench = false

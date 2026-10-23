@@ -4,21 +4,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). The repo currently contains **only the design spec**: `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French). No Gradle project, sources or Rust crate exist yet; only the theme resources under `app/src/main/res/` (`colors.xml`, `values-night/colors.xml`, `themes.xml` → `Theme.AKeeper`). Green/amber/red (`akeeper_state_*`) are reserved for the protection status; never use them for errors, "blocked" verdicts or destructive actions. That spec is the source of truth. Part I corrects earlier assumptions, Part II is the implementation spec with reference code for `build.gradle.kts`, the manifest, XML configs, the `vpn/` and `security/` classes and their tests. Scaffold from it rather than inventing structure, and update the spec when a design decision changes. `docs/preconisation-initialisation.md` refines the spec for the bootstrap: module split, Gradle/Cargo setup, CI, milestones, and the deviations from the spec still to approve (the Rust `FlowTable` as the single flow cache, a fixed binary rule envelope with an FST payload). Package is `com.akeeper` (lowercase, approved). `docs/ui-ecrans.md` specifies the screens (onboarding, home states, apps, activity, settings, notifications).
+aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). Milestone **J0** (build chain) is in place; milestones are listed in `docs/preconisation-initialisation.md` §5.
 
-License: GPL-3.0. `.gitignore` is the standard Android Studio one (keystores and `google-services.json` are ignored).
+- `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French) is the source of truth. Part I corrects earlier assumptions; Part II is the implementation spec. Update it when a design decision changes.
+- `docs/preconisation-initialisation.md` refines it for the bootstrap. Deviations still to approve: the Rust `FlowTable` as the single flow cache, and a fixed binary rule envelope with an FST payload instead of protobuf.
+- `docs/ui-ecrans.md` specifies the screens. Green/amber/red (`akeeper_state_*` in `app/src/main/res/values*/colors.xml`) are reserved for the protection status; never use them for errors, "blocked" verdicts or destructive actions.
+- Package is `com.akeeper` (lowercase, approved).
 
-## Planned build and test commands (once scaffolded)
+Layout:
+- `app/`: manifest (no backup, network security config, `Theme.AKeeper`), resources. No Activity yet (J1).
+- `vpn/`: `ShieldPolicy`, `LockdownStatus`, `FlowOwnerResolver`, `com.akeeper.security.AdvancedProtectionPolicy`. `ShieldVpnService` arrives in J1.
+- `engine/`: `NativeEngine` (JNI). The `cargoNdk<Variant>` task builds `rust/` and feeds the `.so` to the variant's `jniLibs`.
+- `rust/`: workspace `akeeper-proto` (pure bounded parsers), `akeeper-engine` (mio loop on the TUN fd), `akeeper-ffi` (the only crate allowed `unsafe`). `rust/fuzz/` is a separate nightly-only workspace.
+- `build-logic/`: convention plugins `akeeper.android-library` / `akeeper.android-application` (compileSdk/minSdk 36, Java 21, JUnit 5, pinned NDK) and the `CargoNdkBuild` task.
 
-From the spec: Gradle Kotlin DSL, a single `app` module, namespace/applicationId `com.akeeper`, Java 21, and JUnit 5 (`useJUnitPlatform()`) with Mockito and AssertJ.
+At J0 the engine counts then **drops** every packet: nothing leaves the tunnel until a verdict exists. The JNI contract is scalars only (`nativeStart(fd)`, `nativeCounter(handle, index)`, `nativeStop(handle)`). `NativeEngine` methods are `synchronized` so a counter read can't race `nativeStop` into a use-after-free. `Counter` indices must stay in sync between `NativeEngine.Counter` and `akeeper_engine::Counter`.
+
+License: GPL-3.0.
+
+## Commands
+
+Prerequisites: JDK 21, Android SDK (platform 36) with `local.properties` or `ANDROID_HOME`, NDK `30.0.16248370` (the `ndk` version in `gradle/libs.versions.toml`), Rust stable with targets `aarch64-linux-android` and `x86_64-linux-android`, and `cargo install cargo-ndk`. Set `ANDROID_NDK_HOME` to that NDK.
 
 ```bash
-./gradlew assembleDebug
-./gradlew :app:testDebugUnitTest
-./gradlew :app:testDebugUnitTest --tests 'com.akeeper.vpn.FlowOwnerResolverTest'
+./gradlew check :app:assembleRelease          # what CI runs: lint + JVM unit tests + release APK
+./gradlew :vpn:testDebugUnitTest --tests 'com.akeeper.vpn.FlowOwnerResolverTest'
+scripts/check-16kb.sh app/build/outputs/apk/release/app-release-unsigned.apk
+
+cd rust
+cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo test -p akeeper-proto ip::tests::parses_ipv4_udp
+cargo +nightly fuzz run packet -- -max_total_time=60
 ```
 
-The native engine (Rust, through JNI) must be linked with `-C link-arg=-Wl,-z,max-page-size=16384`. CI checks 16 KB alignment with `zipalign -c -P 16 -v 4 <apk>` and `llvm-readelf -l` (every `LOAD` segment aligned ≥ 0x4000). Parser fuzzing uses `cargo-fuzz` in a nightly CI job.
+- **AGP 9 Kotlin**: built-in Kotlin is disabled (`android.builtInKotlin=false`) because all modules are Java. Re-enable it only if Kotlin sources are added.
+- **Rust lints**: `unwrap`, `expect`, `panic` and indexing/slicing are `deny`; use `get()` and `Result`. Tests opt out with `#[allow]`.
+- **16 KB alignment**: the native `.so` files are linked with `-z max-page-size=16384` (`rust/.cargo/config.toml`). AGP strips them because `ndkVersion` is pinned.
 
 ## Architecture (Part II §4)
 

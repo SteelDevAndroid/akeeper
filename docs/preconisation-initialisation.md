@@ -2,6 +2,18 @@
 
 Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. L'objectif est d'organiser le projet selon les fonctions à livrer (DNS filtrant, pare-feu par app, anti-évasion, règles signées, fail-closed) et de placer les optimisations là où se trouve le coût réel : le chemin paquet.
 
+## Avancement
+
+**J0 livré** : chaîne de build Java + Rust, CI, contrôle 16 KB et fuzzing. Écarts avec ce document, volontaires pour ne livrer aucun code mort :
+
+- Modules `:app`, `:vpn` et `:engine` seulement. `:rules` et `:storage` arrivent en J5, avec leur contenu.
+- Le contrat JNI se limite pour l'instant à `nativeStart(fd)`, `nativeCounter(handle, index)` et `nativeStop(handle)`, sans aucun objet Java. `Host` (`protect`, `ownerUid`, `onEvents`) arrive en J1 avec le résolveur DNS, `reloadRules` en J5.
+- Le moteur compte puis abandonne chaque paquet : rien ne ressort du tunnel tant qu'aucun verdict n'existe.
+- Versions retenues : AGP 9.4.1, Gradle 9.8.1, NDK 30.0.16248370, JUnit 5.14.4, Mockito 5.24.0, AssertJ 3.27.7, Material 1.14.0. Le Kotlin intégré d'AGP 9 est désactivé (modules 100 % Java).
+- L'audit `cargo-deny` n'est pas encore dans la CI : il faut d'abord écrire sa politique (`deny.toml`).
+
+Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
+
 ## 1. Décisions structurantes
 
 | Sujet | Choix | Gain |
