@@ -11,9 +11,10 @@ pub use blocklist::Blocklist;
 pub use dns::MAX_UPSTREAMS;
 pub use stats::{Counter, Stats};
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -32,12 +33,19 @@ use udp_nat::UdpNat;
 pub const DNS_V4: Ipv4Addr = Ipv4Addr::new(10, 111, 0, 53);
 pub const DNS_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0x6d73, 0, 0, 0, 0, 0, 0x53);
 
-/// Exclut un socket du tunnel (`VpnService.protect`) ; `false` si le système refuse.
-pub type Protector = Arc<dyn Fn(RawFd) -> bool + Send + Sync>;
+/// Services Android rendus au moteur ; appelés depuis le thread moteur, une fois par socket ou par nouveau flux.
+pub trait Host: Send + Sync {
+    /// Exclut un socket du tunnel (`VpnService.protect`) ; `false` si le système refuse.
+    fn protect(&self, fd: RawFd) -> bool;
+    /// UID de l'app propriétaire de la connexion (`ConnectivityManager.getConnectionOwnerUid`), `None` si inconnu.
+    fn owner_uid(&self, protocol: u8, local: SocketAddr, remote: SocketAddr) -> Option<u32>;
+}
+
+pub type SharedHost = Arc<dyn Host>;
 
 pub struct Config {
     pub blocklist: Blocklist,
-    pub protector: Protector,
+    pub host: SharedHost,
 }
 
 const DNS_PORT: u16 = 53;
@@ -54,6 +62,7 @@ const EXPIRY_TICK: Duration = Duration::from_secs(1);
 enum Command {
     Stop,
     SetUpstream(usize, Option<UdpSocket>),
+    SetBlockedUids(HashSet<u32>),
 }
 
 pub struct Engine {
@@ -80,8 +89,9 @@ impl Engine {
                 move || {
                     let flows = Flows {
                         resolver: Resolver::new(config.blocklist),
-                        nat: UdpNat::new(Arc::clone(&config.protector)),
-                        tcp: TcpStack::new(config.protector, random_seed()),
+                        nat: UdpNat::new(Arc::clone(&config.host)),
+                        tcp: TcpStack::new(config.host, random_seed()),
+                        blocked: HashSet::new(),
                     };
                     run(poll, File::from(tun), flows, &inbox, &stats)
                 }
@@ -104,6 +114,11 @@ impl Engine {
             s.set_nonblocking(true)?;
         }
         self.send(Command::SetUpstream(slot, socket))
+    }
+
+    /// Remplace l'ensemble des apps privées d'Internet ; leurs flux ouverts sont coupés aussitôt.
+    pub fn set_blocked_uids(&self, uids: impl IntoIterator<Item = u32>) -> io::Result<()> {
+        self.send(Command::SetBlockedUids(uids.into_iter().collect()))
     }
 
     pub fn stats(&self) -> &Stats {
@@ -146,6 +161,8 @@ struct Flows {
     resolver: Resolver,
     nat: UdpNat,
     tcp: TcpStack,
+    /// UID des apps privées d'Internet (pare-feu par app).
+    blocked: HashSet<u32>,
 }
 
 fn random_seed() -> u64 {
@@ -194,6 +211,11 @@ fn run(
                                 slot,
                                 socket,
                             )?,
+                            Command::SetBlockedUids(uids) => {
+                                flows.nat.apply_policy(poll.registry(), &uids);
+                                flows.tcp.apply_policy(&uids);
+                                flows.blocked = uids;
+                            }
                         }
                     }
                 }
@@ -327,10 +349,16 @@ fn handle(
                     stats.add(Counter::QuicBlocked, 1);
                     icmp::build_port_unreachable(raw, packet, out).is_ok()
                 }
-                _ => {
-                    flows.nat.send(registry, &datagram, now, stats);
-                    false
-                }
+                _ => match flows
+                    .nat
+                    .send(registry, &datagram, &flows.blocked, now, stats)
+                {
+                    // App privée d'Internet : refus immédiat plutôt qu'un délai d'expiration côté app.
+                    udp_nat::Sent::Blocked => {
+                        icmp::build_port_unreachable(raw, packet, out).is_ok()
+                    }
+                    udp_nat::Sent::Relayed | udp_nat::Sent::Failed => false,
+                },
             }
         }
         ip::PROTO_TCP => {
@@ -343,7 +371,9 @@ fn handle(
                 return tcp::build_reset(&segment, out).is_some_and(|built| built.is_ok());
             }
             if !tcp_stack::is_tunnel_address(segment.dst.ip()) {
-                flows.tcp.ingest(registry, raw, &segment, stats);
+                flows
+                    .tcp
+                    .ingest(registry, raw, &segment, &flows.blocked, stats);
             }
             false
         }
@@ -360,7 +390,6 @@ fn write_tun(tun: &mut File, packet: &[u8]) {
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
     use std::os::unix::net::UnixDatagram;
 
     const CLIENT: &str = "10.111.0.1:40000";
@@ -394,10 +423,30 @@ mod tests {
         out
     }
 
+    struct TestHost {
+        protect: bool,
+        uid: Option<u32>,
+    }
+
+    impl Host for TestHost {
+        fn protect(&self, _: RawFd) -> bool {
+            self.protect
+        }
+
+        fn owner_uid(&self, _: u8, _: SocketAddr, _: SocketAddr) -> Option<u32> {
+            self.uid
+        }
+    }
+
+    const APP_UID: u32 = 10_123;
+
     fn config(list: &str, protect: bool) -> Config {
         Config {
             blocklist: Blocklist::from_domains(list),
-            protector: Arc::new(move |_| protect),
+            host: Arc::new(TestHost {
+                protect,
+                uid: Some(APP_UID),
+            }),
         }
     }
 
@@ -919,6 +968,75 @@ mod tests {
             listener.accept().is_err(),
             "aucune connexion amont sans protect()"
         );
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn refuses_connections_of_a_blocked_app() {
+        let (app, engine) = start("");
+        engine.set_blocked_uids([APP_UID]).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let client = sa("10.111.0.1:40020");
+        app.send(&tcp_packet(
+            client,
+            listener.local_addr().unwrap(),
+            1,
+            0,
+            tcp::SYN,
+            &[],
+        ))
+        .unwrap();
+        let (segment, _) = next_segment(&app);
+        assert_ne!(segment.flags & tcp::RST, 0);
+        assert!(
+            listener.accept().is_err(),
+            "aucune connexion amont pour une app bloquée"
+        );
+
+        let remote = UdpSocket::bind("127.0.0.1:0").unwrap();
+        remote
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut packet = Vec::new();
+        udp::build(sa(CLIENT), remote.local_addr().unwrap(), b"x", &mut packet).unwrap();
+        app.send(&packet).unwrap();
+        let mut buf = [0u8; 256];
+        let n = app.recv(&mut buf).unwrap();
+        assert_eq!(ip::parse(&buf[..n]).unwrap().protocol, ip::PROTO_ICMP);
+        assert!(remote.recv_from(&mut buf).is_err());
+        assert_eq!(engine.stats().get(Counter::AppBlocked), 2);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn cuts_open_connection_when_app_gets_blocked() {
+        let (app, engine) = start("");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote = listener.local_addr().unwrap();
+        let server = thread::spawn(move || listener.accept().unwrap());
+        let client = sa("10.111.0.1:40021");
+        app.send(&tcp_packet(client, remote, 1, 0, tcp::SYN, &[]))
+            .unwrap();
+        let (syn_ack, _) = next_segment(&app);
+        app.send(&tcp_packet(
+            client,
+            remote,
+            2,
+            syn_ack.seq.wrapping_add(1),
+            tcp::ACK,
+            &[],
+        ))
+        .unwrap();
+        let _conn = server.join().unwrap();
+
+        engine.set_blocked_uids([APP_UID]).unwrap();
+        loop {
+            let (segment, _) = next_segment(&app);
+            if segment.flags & tcp::RST != 0 {
+                break;
+            }
+        }
         engine.stop().unwrap();
     }
 

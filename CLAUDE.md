@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). Milestones J0 (build chain), J1 (DNS filtering) and J2 (full tunnel) are in place. All milestones are listed in `docs/preconisation-initialisation.md` §5, and its "Avancement" section tracks what each delivered and deferred.
 
 - `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French) is the source of truth. Part I corrects earlier assumptions; Part II is the implementation spec. Update it when a design decision changes.
-- `docs/preconisation-initialisation.md` refines it for the bootstrap. Deviations still to approve: the Rust `FlowTable` as the single flow cache, and a fixed binary rule envelope with an FST payload instead of protobuf.
+- `docs/preconisation-initialisation.md` refines it for the bootstrap. Approved deviation: the Rust flow tables (`TcpStack`, `UdpNat`) are the single attribution cache; `FlowOwnerResolver` is a plain uncached call. Still to approve: a fixed binary rule envelope with an FST payload instead of protobuf.
 - `docs/listes-de-blocage.md` evaluates the blocklist sources. Defaults: HaGeZi LIGHT + Phishing Army + URLhaus (abuse.ch agreement reported by the project owner). StevenBlack is excluded. The URLhaus Auth-Key is a server-side pipeline secret only. The plan is one prebuilt FST per category in the signed bundle.
 - `docs/ui-ecrans.md` specifies the screens. Green/amber/red (`akeeper_state_*` in `app/src/main/res/values*/colors.xml`) are reserved for the protection status; never use them for errors, "blocked" verdicts or destructive actions.
 - Package is `com.akeeper` (lowercase, approved).
@@ -38,16 +38,19 @@ Engine verdicts (spec §6). Anything not listed is dropped (ICMP echo included):
 - **Other UDP**: relayed by `UdpNat` over one protected, connected socket per (client, destination), with a 60 s idle timeout and a 1024-flow cap.
 - **TCP to the resolver IPs and TCP/853 to any IP**: RST.
 - **Other TCP**: terminated by `TcpStack` and relayed over a protected socket. Caps: 512 flows, 64 KiB buffers. The upstream connect starts on the SYN; if it fails, the app gets a RST.
+- **Per-app firewall**: a new flow from a blocked UID is refused: RST for TCP, ICMP port unreachable for UDP. `setBlockedUids` also cuts that UID's open flows. An unknown UID (-1) is allowed.
 - **Never send through an unprotected socket**: if `protect()` returns false, the flow is refused (counted as `UdpNatFailures` / `TcpFailures`).
 - **IPv4 fragments are dropped.**
 
 The blocklist is `filesDir/blocklist.txt`, one domain per line, read once at start; there is no UI or default list yet.
 
 JNI contract:
-- `nativeStart(tunFd, blocklistFd, host)`, `nativeSetUpstream(handle, slot, fd)`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given.
-- `host` is the only Java object to cross. It is a `NativeEngine.Host` held as a global ref; `protect(int)` is called from the engine thread, which stays attached to the JVM. The R8 keep rule is in `engine/consumer-rules.pro`.
+- `nativeStart(tunFd, blocklistFd, host)`, `nativeSetUpstream(handle, slot, fd)`, `nativeSetBlockedUids(handle, int[])`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given.
+- `host` is a `NativeEngine.Host` held as a global ref. The engine thread stays attached to the JVM and calls it: `protect(int)` per socket, and `ownerUid(...)` once per new flow (`FlowOwnerResolver`, uncached).
+- Every callback runs inside a JNI local frame, because that thread never returns to Java and local refs would leak.
+- The R8 keep rules are in `engine/consumer-rules.pro`.
 - `NativeEngine` methods are `synchronized` so a call can't race `nativeStop` into a use-after-free.
-- Keep `NativeEngine.Counter` and `akeeper_engine::Counter` in the same order (13 counters), and `NativeEngine.MAX_UPSTREAMS` equal to `akeeper_engine::MAX_UPSTREAMS`.
+- Keep `NativeEngine.Counter` and `akeeper_engine::Counter` in the same order (14 counters), and `NativeEngine.MAX_UPSTREAMS` equal to `akeeper_engine::MAX_UPSTREAMS`.
 
 License: GPL-3.0.
 
@@ -95,7 +98,7 @@ These come from the spec. Breaking any of them is a security regression.
 - **Never** call `allowBypass()` or `allowFamily()`, and never exclude the app itself via `addDisallowedApplication`. Use `protect()` on outgoing sockets. Always route `::/0` explicitly.
 - LAN `excludeRoute()` is opt-in, off by default, and forbidden while Advanced Protection Mode is on (`ShieldPolicy.hardened()` is forced then).
 - **No TLS MITM.** Evasion handling (§6): DNAT stray port-53 traffic to the local resolver, RST TCP/853 to the virtual DNS IP, NODATA for DNS type 65 (kills ECH), NXDOMAIN for `use-application-dns.net`, ICMP unreachable for UDP/443 (forces QUIC to fall back to TCP), a signed DoH IP/SNI blocklist.
-- `getConnectionOwnerUid()` needs no permission, only the active VPN role. Cache results per 5-tuple. Keep the Binder call **outside** the cache lock (see `FlowOwnerResolver`).
+- `getConnectionOwnerUid()` needs no permission, only the active VPN role. It is called once per new flow, from the engine thread; the UID is kept in the flow entry (approved deviation from the spec's Java LRU).
 - Components are non-exported, `PendingIntent.FLAG_IMMUTABLE`, receivers `RECEIVER_NOT_EXPORTED`, and a received `Intent` is never re-launched as-is.
 - Storage (§7): Room + SQLCipher with a key wrapped by Keystore AES-GCM (StrongBox first, TEE fallback). Preferences use DataStore + Tink AEAD. **Do not use `EncryptedSharedPreferences`** (deprecated).
 - Rule bundles are protobuf signed with **Ed25519** (two embedded public keys for rotation), carry a monotonic version (anti-rollback) and are activated atomically (temp file → verify → rename). Never use HMAC.

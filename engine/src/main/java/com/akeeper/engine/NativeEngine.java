@@ -20,14 +20,21 @@ public final class NativeEngine implements AutoCloseable {
     /** Indices partagés avec {@code akeeper_engine::Counter} : l'ordre fait partie du contrat JNI. */
     public enum Counter {
         PACKETS, BYTES, MALFORMED, TCP, UDP, ICMP, DNS_QUERIES, DNS_BLOCKED, DNS_UPSTREAM_FAILURES,
-        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES
+        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES, APP_BLOCKED
     }
 
-    /** Rappelé par le thread natif ; doit rester rapide et ne jamais bloquer. */
-    @FunctionalInterface
+    /** Rappelé par le thread natif, une fois par socket ou par nouveau flux : doit rester rapide. */
     public interface Host {
         /** {@code VpnService.protect(int)} : exclut ce socket du tunnel. */
         boolean protect(int fd);
+
+        /**
+         * UID de l'app propriétaire de la connexion ({@code getConnectionOwnerUid}), -1 si inconnu.
+         *
+         * @param protocol {@code IPPROTO_TCP} ou {@code IPPROTO_UDP}
+         * @param localAddress adresse brute (4 ou 16 octets) côté app
+         */
+        int ownerUid(int protocol, byte[] localAddress, int localPort, byte[] remoteAddress, int remotePort);
     }
 
     // Garde par le moniteur : un appel natif pendant close() utiliserait la mémoire libérée (use-after-free).
@@ -65,6 +72,11 @@ public final class NativeEngine implements AutoCloseable {
         return nativeSetUpstream(handle, slot, detachedSocketFd) == 0;
     }
 
+    /** Prive d'Internet les UID donnés (pare-feu par app) ; leurs connexions ouvertes sont coupées. */
+    public synchronized boolean setBlockedUids(int[] uids) {
+        return handle != 0 && nativeSetBlockedUids(handle, uids) == 0;
+    }
+
     /** Renvoie -1 une fois le moteur arrêté. */
     public synchronized long counter(Counter counter) {
         return handle == 0 ? -1 : nativeCounter(handle, counter.ordinal());
@@ -91,6 +103,8 @@ public final class NativeEngine implements AutoCloseable {
     private static native long nativeStart(int tunFd, int blocklistFd, Host host);
 
     private static native int nativeSetUpstream(long handle, int slot, int fd);
+
+    private static native int nativeSetBlockedUids(long handle, int[] uids);
 
     private static native long nativeCounter(long handle, int counter);
 

@@ -1,7 +1,7 @@
 //! Terminaison TCP en espace utilisateur : chaque connexion d'une app vers Internet est acceptée par smoltcp
 //! côté TUN et relayée par un socket système protégé. Aucun MITM : les octets passent tels quels.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 use std::os::fd::AsRawFd;
@@ -16,7 +16,7 @@ use smoltcp::time::Instant as SmolInstant;
 use smoltcp::wire::{HardwareAddress, IpCidr, IpListenEndpoint};
 use socket2::{Domain, Protocol, Socket, Type};
 
-use crate::Protector;
+use crate::SharedHost;
 use crate::stats::{Counter, Stats};
 
 /// Jetons mio des sockets amont TCP ; ceux de l'UDP NAT restent en dessous.
@@ -75,6 +75,7 @@ impl Device for Queue {
 
 struct Flow {
     handle: SocketHandle,
+    uid: Option<u32>,
     upstream: TcpStream,
     client: SocketAddr,
     remote: SocketAddr,
@@ -89,7 +90,7 @@ struct Flow {
 }
 
 pub(crate) struct TcpStack {
-    protector: Protector,
+    host: SharedHost,
     iface: Interface,
     device: Queue,
     sockets: SocketSet<'static>,
@@ -100,7 +101,7 @@ pub(crate) struct TcpStack {
 }
 
 impl TcpStack {
-    pub(crate) fn new(protector: Protector, seed: u64) -> Self {
+    pub(crate) fn new(host: SharedHost, seed: u64) -> Self {
         let mut device = Queue::default();
         let mut config = Config::new(HardwareAddress::Ip);
         config.random_seed = seed;
@@ -116,7 +117,7 @@ impl TcpStack {
             ));
         });
         Self {
-            protector,
+            host,
             iface,
             device,
             sockets: SocketSet::new(Vec::new()),
@@ -144,11 +145,20 @@ impl TcpStack {
         registry: &Registry,
         raw: &[u8],
         segment: &Segment,
+        blocked: &HashSet<u32>,
         stats: &Stats,
     ) {
         let is_new_syn = segment.flags & tcp::SYN != 0 && segment.flags & tcp::ACK == 0;
         if is_new_syn && !self.by_endpoints.contains_key(&(segment.src, segment.dst)) {
-            match self.open(registry, segment.src, segment.dst) {
+            // Attribution une seule fois, au SYN : l'UID reste dans l'entrée de flux.
+            let uid = self.host.owner_uid(tcp::PROTO, segment.src, segment.dst);
+            if uid.is_some_and(|u| blocked.contains(&u)) {
+                // Sans listener, smoltcp répond RST : l'app privée d'Internet échoue aussitôt.
+                stats.add(Counter::AppBlocked, 1);
+                self.device.rx.push_back(raw.to_vec());
+                return;
+            }
+            match self.open(registry, segment.src, segment.dst, uid) {
                 Ok(()) => stats.add(Counter::TcpFlows, 1),
                 Err(_) => {
                     // Sans listener, smoltcp répond RST au SYN : l'app échoue vite au lieu d'attendre.
@@ -164,6 +174,7 @@ impl TcpStack {
         registry: &Registry,
         client: SocketAddr,
         remote: SocketAddr,
+        uid: Option<u32>,
     ) -> io::Result<()> {
         if self.flows.len() >= MAX_FLOWS {
             return Err(io::Error::from(ErrorKind::OutOfMemory));
@@ -174,7 +185,7 @@ impl TcpStack {
             Some(Protocol::TCP),
         )?;
         // Sans protect(), la connexion amont repartirait dans le tunnel : jamais de connexion non protégée.
-        if !(self.protector)(socket.as_raw_fd()) {
+        if !self.host.protect(socket.as_raw_fd()) {
             return Err(io::Error::from(ErrorKind::PermissionDenied));
         }
         socket.set_nonblocking(true)?;
@@ -214,6 +225,7 @@ impl TcpStack {
             token,
             Flow {
                 handle,
+                uid,
                 upstream,
                 client,
                 remote,
@@ -228,6 +240,15 @@ impl TcpStack {
             },
         );
         Ok(())
+    }
+
+    /// Coupe (RST) les connexions des apps nouvellement privées d'Internet ; le nettoyage suit au prochain `run`.
+    pub(crate) fn apply_policy(&mut self, blocked: &HashSet<u32>) {
+        for flow in self.flows.values_mut() {
+            if flow.uid.is_some_and(|u| blocked.contains(&u)) {
+                flow.failed = true;
+            }
+        }
     }
 
     pub(crate) fn upstream_event(&mut self, token: usize, readable: bool, writable: bool) {

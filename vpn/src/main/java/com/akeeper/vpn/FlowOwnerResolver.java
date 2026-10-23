@@ -2,62 +2,35 @@ package com.akeeper.vpn;
 
 import android.net.ConnectivityManager;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.OptionalInt;
+import java.net.UnknownHostException;
 
+/**
+ * Attribution d'une connexion à son app. Sans cache : le moteur n'appelle qu'une fois par nouveau flux
+ * et conserve l'UID dans sa table de flux.
+ */
 public final class FlowOwnerResolver {
 
     static final int INVALID_UID = -1;
 
-    public record FlowKey(int protocol, InetSocketAddress local, InetSocketAddress remote) {
-        public FlowKey {
-            Objects.requireNonNull(local);
-            Objects.requireNonNull(remote);
-        }
-    }
-
     private final ConnectivityManager connectivityManager;
-    private final Map<FlowKey, Integer> cache;
 
-    public FlowOwnerResolver(ConnectivityManager connectivityManager, int maxEntries) {
+    public FlowOwnerResolver(ConnectivityManager connectivityManager) {
         this.connectivityManager = connectivityManager;
-        this.cache = new LinkedHashMap<>(maxEntries, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<FlowKey, Integer> eldest) {
-                return size() > maxEntries;
-            }
-        };
     }
 
-    // LinkedHashMap en ordre d'accès n'est pas thread-safe ; l'appel Binder reste hors verrou pour ne pas sérialiser les nouveaux flux.
-    public OptionalInt resolve(FlowKey key) {
-        synchronized (cache) {
-            var cached = cache.get(key);
-            if (cached != null) {
-                return OptionalInt.of(cached);
-            }
-        }
-        int uid;
+    /** @return l'UID propriétaire, ou {@link #INVALID_UID} si inconnu ou si l'app n'est plus le VPN actif */
+    public int ownerUid(int protocol, byte[] localAddress, int localPort, byte[] remoteAddress, int remotePort) {
         try {
-            uid = connectivityManager.getConnectionOwnerUid(key.protocol(), key.local(), key.remote());
+            var local = new InetSocketAddress(InetAddress.getByAddress(localAddress), localPort);
+            var remote = new InetSocketAddress(InetAddress.getByAddress(remoteAddress), remotePort);
+            return connectivityManager.getConnectionOwnerUid(protocol, local, remote);
+        } catch (UnknownHostException malformedAddress) {
+            return INVALID_UID;
         } catch (SecurityException notActiveVpn) {
-            return OptionalInt.empty();
-        }
-        if (uid == INVALID_UID) {
-            return OptionalInt.empty();
-        }
-        synchronized (cache) {
-            cache.put(key, uid);
-        }
-        return OptionalInt.of(uid);
-    }
-
-    public void evict(FlowKey key) {
-        synchronized (cache) {
-            cache.remove(key);
+            // Plus le VPN actif (révocation en cours) : flux non attribuable, jamais d'exception vers le moteur.
+            return INVALID_UID;
         }
     }
 }

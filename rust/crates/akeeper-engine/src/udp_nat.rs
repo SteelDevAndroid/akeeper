@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
@@ -8,7 +8,9 @@ use akeeper_proto::udp::Datagram;
 use mio::net::UdpSocket;
 use mio::{Interest, Registry, Token};
 
-use crate::Protector;
+use akeeper_proto::ip::PROTO_UDP;
+
+use crate::SharedHost;
 use crate::stats::{Counter, Stats};
 
 /// Premier jeton mio réservé aux flux UDP ; ceux d'en dessous appartiennent au TUN, au réveil et aux DNS amont.
@@ -17,8 +19,16 @@ pub(crate) const TOKEN_BASE: usize = 16;
 const MAX_FLOWS: usize = 1024;
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+pub(crate) enum Sent {
+    Relayed,
+    /// L'app émettrice est privée d'Internet.
+    Blocked,
+    Failed,
+}
+
 struct Flow {
     socket: UdpSocket,
+    uid: Option<u32>,
     client: SocketAddr,
     remote: SocketAddr,
     last_active: Instant,
@@ -26,16 +36,16 @@ struct Flow {
 
 /// NAT UDP : un socket protégé et connecté par couple (client, destination).
 pub(crate) struct UdpNat {
-    protector: Protector,
+    host: SharedHost,
     by_endpoints: HashMap<(SocketAddr, SocketAddr), usize>,
     flows: HashMap<usize, Flow>,
     next_token: usize,
 }
 
 impl UdpNat {
-    pub(crate) fn new(protector: Protector) -> Self {
+    pub(crate) fn new(host: SharedHost) -> Self {
         Self {
-            protector,
+            host,
             by_endpoints: HashMap::new(),
             flows: HashMap::new(),
             next_token: TOKEN_BASE,
@@ -50,31 +60,49 @@ impl UdpNat {
         &mut self,
         registry: &Registry,
         datagram: &Datagram<'_>,
+        blocked: &HashSet<u32>,
         now: Instant,
         stats: &Stats,
-    ) {
+    ) -> Sent {
         let key = (datagram.src, datagram.dst);
         let token = match self.by_endpoints.get(&key) {
             Some(&token) => token,
-            None => match self.open(registry, datagram, now) {
-                Ok(token) => token,
-                Err(_) => {
-                    stats.add(Counter::UdpNatFailures, 1);
-                    return;
+            None => {
+                // Attribution une seule fois, à l'ouverture : l'UID reste dans l'entrée de flux.
+                let uid = self.host.owner_uid(PROTO_UDP, datagram.src, datagram.dst);
+                if uid.is_some_and(|u| blocked.contains(&u)) {
+                    stats.add(Counter::AppBlocked, 1);
+                    return Sent::Blocked;
                 }
-            },
+                match self.open(registry, datagram, uid, now) {
+                    Ok(token) => token,
+                    Err(_) => {
+                        stats.add(Counter::UdpNatFailures, 1);
+                        return Sent::Failed;
+                    }
+                }
+            }
         };
         if let Some(flow) = self.flows.get_mut(&token) {
             flow.last_active = now;
             // Tampon d'émission plein : perte assumée, comme sur un vrai lien UDP.
             let _ = flow.socket.send(datagram.payload);
         }
+        Sent::Relayed
+    }
+
+    /// Ferme les flux des apps nouvellement privées d'Internet.
+    pub(crate) fn apply_policy(&mut self, registry: &Registry, blocked: &HashSet<u32>) {
+        self.remove_where(registry, |flow| {
+            flow.uid.is_some_and(|u| blocked.contains(&u))
+        });
     }
 
     fn open(
         &mut self,
         registry: &Registry,
         datagram: &Datagram<'_>,
+        uid: Option<u32>,
         now: Instant,
     ) -> io::Result<usize> {
         if self.flows.len() >= MAX_FLOWS {
@@ -89,7 +117,7 @@ impl UdpNat {
             "[::]:0"
         })?;
         // Sans protect(), le datagramme repartirait dans le tunnel : boucle infinie, jamais d'envoi non protégé.
-        if !(self.protector)(socket.as_raw_fd()) {
+        if !self.host.protect(socket.as_raw_fd()) {
             return Err(io::Error::from(ErrorKind::PermissionDenied));
         }
         socket.connect(datagram.dst)?;
@@ -104,6 +132,7 @@ impl UdpNat {
             token,
             Flow {
                 socket,
+                uid,
                 client: datagram.src,
                 remote: datagram.dst,
                 last_active: now,
@@ -140,13 +169,19 @@ impl UdpNat {
     }
 
     pub(crate) fn expire(&mut self, registry: &Registry, now: Instant) {
-        let stale: Vec<usize> = self
+        self.remove_where(registry, |flow| {
+            now.duration_since(flow.last_active) >= IDLE_TIMEOUT
+        });
+    }
+
+    fn remove_where(&mut self, registry: &Registry, condition: impl Fn(&Flow) -> bool) {
+        let doomed: Vec<usize> = self
             .flows
             .iter()
-            .filter(|(_, f)| now.duration_since(f.last_active) >= IDLE_TIMEOUT)
+            .filter(|(_, f)| condition(f))
             .map(|(&t, _)| t)
             .collect();
-        for token in stale {
+        for token in doomed {
             if let Some(mut flow) = self.flows.remove(&token) {
                 // Désinscription best effort : le fd est fermé juste après, epoll l'oublie de toute façon.
                 let _ = registry.deregister(&mut flow.socket);

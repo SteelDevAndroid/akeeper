@@ -122,7 +122,7 @@ TUN (10.111.0.1/32, fd00:6d73::1/128, routes 0.0.0.0/0 et ::/0)
      └─ Forwarder (sockets protect(), proxy TCP userspace, NAT UDP)
 Java (Android)
  ├─ ShieldVpnService (cycle de vie, FGS systemExempted, onRevoke)
- ├─ FlowOwnerResolver (getConnectionOwnerUid + cache)
+ ├─ FlowOwnerResolver (getConnectionOwnerUid, sans cache : l'UID est mémorisé dans la table de flux du moteur)
  ├─ RuleRepository (Room + SQLCipher, clé enveloppée Keystore)
  └─ RuleUpdater (WorkManager, vérification de signature avant activation atomique)
 ```
@@ -384,6 +384,8 @@ public record LockdownStatus(boolean alwaysOn, boolean lockdown, boolean revoked
 ```
 
 ### `vpn/FlowOwnerResolver.java`
+
+> **Révisé (décision du 23/10/2026)** : le cache LRU Java ci-dessous est supprimé. Le moteur Rust appelle `ownerUid()` une seule fois par nouveau flux et conserve l'UID dans sa table de flux ; voir `docs/preconisation-initialisation.md` §6.
 
 ```java
 package com.akeeper.vpn;

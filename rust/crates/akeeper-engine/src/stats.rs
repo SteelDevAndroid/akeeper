@@ -19,9 +19,10 @@ pub enum Counter {
     UdpNatFailures = 10,
     TcpFlows = 11,
     TcpFailures = 12,
+    AppBlocked = 13,
 }
 
-const COUNTERS: usize = 13;
+const COUNTERS: usize = 14;
 
 impl Counter {
     pub fn from_index(index: i32) -> Option<Self> {
@@ -39,6 +40,7 @@ impl Counter {
             10 => Self::UdpNatFailures,
             11 => Self::TcpFlows,
             12 => Self::TcpFailures,
+            13 => Self::AppBlocked,
             _ => return None,
         })
     }

@@ -72,7 +72,8 @@ public final class ShieldVpnService extends VpnService {
             return false;
         }
         try {
-            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), this::protect);
+            engine = NativeEngine.start(tun.detachFd(), openBlocklist(),
+                    new EngineHost(new FlowOwnerResolver(getSystemService(ConnectivityManager.class))));
         } catch (IllegalStateException e) {
             return false;
         }
@@ -81,6 +82,26 @@ public final class ShieldVpnService extends VpnService {
                 this::followUnderlying);
         upstream.start(new Handler(Looper.getMainLooper()));
         return true;
+    }
+
+    /** Appelé depuis le thread natif : protect() et getConnectionOwnerUid() sont sûrs hors thread principal. */
+    private final class EngineHost implements NativeEngine.Host {
+
+        private final FlowOwnerResolver resolver;
+
+        EngineHost(FlowOwnerResolver resolver) {
+            this.resolver = resolver;
+        }
+
+        @Override
+        public boolean protect(int fd) {
+            return ShieldVpnService.this.protect(fd);
+        }
+
+        @Override
+        public int ownerUid(int protocol, byte[] localAddress, int localPort, byte[] remoteAddress, int remotePort) {
+            return resolver.ownerUid(protocol, localAddress, localPort, remoteAddress, remotePort);
+        }
     }
 
     private void followUnderlying(Network network) {

@@ -3,6 +3,9 @@ use std::net::SocketAddr;
 use crate::checksum;
 use crate::ip::{self, BuildError, IpPacket, PROTO_TCP};
 
+/// Numéro de protocole IP de TCP.
+pub const PROTO: u8 = PROTO_TCP;
+
 const MIN_HEADER: usize = 20;
 
 pub const FIN: u8 = 0x01;
