@@ -1,14 +1,16 @@
 //! Points d'entrée JNI de `com.akeeper.engine.NativeEngine`.
-//! Seuls des scalaires traversent la frontière : aucun objet Java n'est manipulé côté natif.
+//! Hors `nativeStart` (qui reçoit l'hôte Java), seuls des scalaires traversent la frontière.
 
 use std::ffi::c_void;
-use std::os::fd::{FromRawFd, OwnedFd};
-use std::panic::{AssertUnwindSafe, catch_unwind};
-
 use std::io::Read;
 use std::net::UdpSocket;
+use std::os::fd::{FromRawFd, OwnedFd};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
-use akeeper_engine::{Blocklist, Counter, Engine};
+use akeeper_engine::{Blocklist, Config, Counter, Engine, Protector};
+use jni::JNIEnv;
+use jni::objects::{JClass as JniClass, JObject, JValue};
 
 type JniEnv = c_void;
 type JClass = c_void;
@@ -17,19 +19,45 @@ type JLong = i64;
 
 /// Prend possession de `tun_fd` et de `blocklist_fd` (détachés côté Java ; -1 = liste vide)
 /// et renvoie un handle opaque, ou 0 en cas d'échec. Les deux fd sont fermés dans tous les cas.
+/// `host` implémente `NativeEngine.Host` ; une référence globale est conservée jusqu'à `nativeStop`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeStart(
-    _env: *mut JniEnv,
-    _class: *mut JClass,
+pub extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JniClass<'local>,
     tun_fd: JInt,
     blocklist_fd: JInt,
+    host: JObject<'local>,
 ) -> JLong {
     let tun = owned(tun_fd);
     let blocklist = owned(blocklist_fd);
-    let Some(tun) = tun else {
+    let (Some(tun), Some(protector)) = (tun, java_protector(&mut env, &host)) else {
         return 0;
     };
-    catch_unwind(AssertUnwindSafe(|| start(tun, blocklist))).unwrap_or(0)
+    catch_unwind(AssertUnwindSafe(|| start(tun, blocklist, protector))).unwrap_or(0)
+}
+
+/// Rappelle `Host.protect(int)` depuis le thread moteur, attaché une fois pour toutes à la JVM.
+fn java_protector(env: &mut JNIEnv<'_>, host: &JObject<'_>) -> Option<Protector> {
+    if host.is_null() {
+        return None;
+    }
+    let vm = env.get_java_vm().ok()?;
+    let host = env.new_global_ref(host).ok()?;
+    Some(Arc::new(move |fd| {
+        // Attachement permanent : un attach/detach par socket coûterait plus cher que l'appel lui-même.
+        let Ok(mut env) = vm.attach_current_thread_permanently() else {
+            return false;
+        };
+        let protected = env
+            .call_method(&host, "protect", "(I)Z", &[JValue::Int(fd)])
+            .and_then(|v| v.z())
+            .unwrap_or(false);
+        // Une exception Java laissée pendante ferait échouer tout appel JNI suivant sur ce thread.
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        protected
+    }))
 }
 
 fn owned(fd: JInt) -> Option<OwnedFd> {
@@ -37,7 +65,7 @@ fn owned(fd: JInt) -> Option<OwnedFd> {
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn start(tun: OwnedFd, blocklist: Option<OwnedFd>) -> JLong {
+fn start(tun: OwnedFd, blocklist: Option<OwnedFd>, protector: Protector) -> JLong {
     if set_nonblocking(&tun).is_err() {
         return 0;
     }
@@ -45,7 +73,13 @@ fn start(tun: OwnedFd, blocklist: Option<OwnedFd>) -> JLong {
         Ok(list) => list.unwrap_or_else(Blocklist::empty),
         Err(_) => return 0,
     };
-    match Engine::start(tun, blocklist) {
+    match Engine::start(
+        tun,
+        Config {
+            blocklist,
+            protector,
+        },
+    ) {
         Ok(engine) => Box::into_raw(Box::new(engine)) as JLong,
         Err(_) => 0,
     }
@@ -154,8 +188,8 @@ mod tests {
     use std::ptr::null_mut;
     use std::time::{Duration, Instant};
 
-    fn start(fd: JInt) -> JLong {
-        Java_com_akeeper_engine_NativeEngine_nativeStart(null_mut(), null_mut(), fd, -1)
+    fn start_with(tun: OwnedFd, blocklist: Option<OwnedFd>) -> JLong {
+        super::start(tun, blocklist, Arc::new(|_| true))
     }
 
     fn set_upstream(handle: JLong, slot: JInt, fd: JInt) -> JInt {
@@ -191,7 +225,7 @@ mod tests {
     #[test]
     fn start_count_stop_round_trip() {
         let (app, engine_side) = UnixDatagram::pair().unwrap();
-        let handle = start(engine_side.into_raw_fd());
+        let handle = start_with(OwnedFd::from(engine_side), None);
         assert_ne!(handle, 0);
 
         app.send(&[0x45]).unwrap();
@@ -216,20 +250,14 @@ mod tests {
         let (reader, mut writer) = std::io::pipe().unwrap();
         std::io::Write::write_all(&mut writer, b"ads.example.net\n").unwrap();
         drop(writer);
-        let handle = Java_com_akeeper_engine_NativeEngine_nativeStart(
-            null_mut(),
-            null_mut(),
-            engine_side.into_raw_fd(),
-            OwnedFd::from(reader).into_raw_fd(),
-        );
+        let handle = start_with(OwnedFd::from(engine_side), Some(OwnedFd::from(reader)));
         assert_ne!(handle, 0);
         drop(app);
         stop(handle);
     }
 
     #[test]
-    fn rejects_invalid_fd_and_null_handle() {
-        assert_eq!(start(-1), 0);
+    fn rejects_null_handle() {
         assert_eq!(counter(0, 0), -1);
         assert_eq!(set_upstream(0, 0, -1), -1);
         stop(0);

@@ -1,9 +1,10 @@
-//! Moteur aKeeper. J1 : résolveur DNS local filtrant derrière les IP virtuelles du TUN.
-//! Tout autre paquet est abandonné : rien ne ressort du tunnel sans verdict explicite (fail-closed).
+//! Moteur aKeeper : résolveur DNS local filtrant, NAT UDP protégé et neutralisation de l'évasion (spec §6).
+//! Tout paquet sans verdict explicite est abandonné : rien ne ressort du tunnel par défaut (fail-closed).
 
 mod blocklist;
 mod dns;
 mod stats;
+mod udp_nat;
 
 pub use blocklist::Blocklist;
 pub use dns::MAX_UPSTREAMS;
@@ -12,21 +13,34 @@ pub use stats::{Counter, Stats};
 use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use akeeper_proto::{ip, tcp, udp};
+use akeeper_proto::{icmp, ip, tcp, udp};
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Registry, Token, Waker};
 
 use dns::{Outcome, Resolver};
+use udp_nat::UdpNat;
 
 /// Adresses du résolveur local annoncées par `VpnService.Builder.addDnsServer` (spec §4).
 pub const DNS_V4: Ipv4Addr = Ipv4Addr::new(10, 111, 0, 53);
 pub const DNS_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0x6d73, 0, 0, 0, 0, 0, 0x53);
+
+/// Exclut un socket du tunnel (`VpnService.protect`) ; `false` si le système refuse.
+pub type Protector = Arc<dyn Fn(RawFd) -> bool + Send + Sync>;
+
+pub struct Config {
+    pub blocklist: Blocklist,
+    pub protector: Protector,
+}
+
+const DNS_PORT: u16 = 53;
+const DOT_PORT: u16 = 853;
+const HTTPS_PORT: u16 = 443;
 
 const TUN: Token = Token(0);
 const WAKE: Token = Token(1);
@@ -49,7 +63,7 @@ pub struct Engine {
 
 impl Engine {
     /// `tun` doit être en mode non bloquant : epoll est déclenché sur front, la boucle lit jusqu'à `WouldBlock`.
-    pub fn start(tun: OwnedFd, blocklist: Blocklist) -> io::Result<Self> {
+    pub fn start(tun: OwnedFd, config: Config) -> io::Result<Self> {
         let poll = Poll::new()?;
         let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
         poll.registry()
@@ -62,13 +76,11 @@ impl Engine {
             .spawn({
                 let stats = Arc::clone(&stats);
                 move || {
-                    run(
-                        poll,
-                        File::from(tun),
-                        Resolver::new(blocklist),
-                        &inbox,
-                        &stats,
-                    )
+                    let flows = Flows {
+                        resolver: Resolver::new(config.blocklist),
+                        nat: UdpNat::new(config.protector),
+                    };
+                    run(poll, File::from(tun), flows, &inbox, &stats)
                 }
             })?;
 
@@ -126,49 +138,79 @@ impl Drop for Engine {
     }
 }
 
+/// État réseau détenu par le thread moteur seul : aucun verrou nécessaire.
+struct Flows {
+    resolver: Resolver,
+    nat: UdpNat,
+}
+
 fn run(
     mut poll: Poll,
     mut tun: File,
-    mut resolver: Resolver,
+    mut flows: Flows,
     inbox: &Receiver<Command>,
     stats: &Stats,
 ) -> io::Result<()> {
-    let mut events = Events::with_capacity(16);
+    let mut events = Events::with_capacity(64);
     let mut buf = vec![0u8; READ_BUFFER];
     let mut out = Vec::with_capacity(1500);
     loop {
-        let timeout = resolver.has_pending().then_some(EXPIRY_TICK);
+        let timeout =
+            (flows.resolver.has_pending() || flows.nat.has_flows()).then_some(EXPIRY_TICK);
         match poll.poll(&mut events, timeout) {
             Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         }
         let now = Instant::now();
-        resolver.expire(now, stats);
+        flows.resolver.expire(now, stats);
+        flows.nat.expire(poll.registry(), now);
         for event in &events {
             match event.token() {
                 WAKE => {
                     while let Ok(command) = inbox.try_recv() {
                         match command {
                             Command::Stop => return Ok(()),
-                            Command::SetUpstream(slot, socket) => {
-                                replace_upstream(poll.registry(), &mut resolver, slot, socket)?
-                            }
+                            Command::SetUpstream(slot, socket) => replace_upstream(
+                                poll.registry(),
+                                &mut flows.resolver,
+                                slot,
+                                socket,
+                            )?,
                         }
                     }
                 }
                 TUN => {
-                    if !drain_tun(&mut tun, &mut buf, &mut out, &mut resolver, now, stats)? {
+                    if !drain_tun(
+                        &mut tun,
+                        poll.registry(),
+                        &mut buf,
+                        &mut out,
+                        &mut flows,
+                        now,
+                        stats,
+                    )? {
                         return Ok(());
                     }
                 }
+                Token(t) if t >= udp_nat::TOKEN_BASE => {
+                    flows
+                        .nat
+                        .drain(t, &mut buf, now, |remote, client, payload| {
+                            if udp::build(remote, client, payload, &mut out).is_ok() {
+                                write_tun(&mut tun, &out);
+                            }
+                        });
+                }
                 Token(t) => {
                     let slot = t - UPSTREAM_BASE;
-                    resolver.drain_upstream(slot, &mut buf, |server, client, msg| {
-                        if udp::build(server, client, msg, &mut out).is_ok() {
-                            write_tun(&mut tun, &out);
-                        }
-                    })?;
+                    flows
+                        .resolver
+                        .drain_upstream(slot, &mut buf, |server, client, msg| {
+                            if udp::build(server, client, msg, &mut out).is_ok() {
+                                write_tun(&mut tun, &out);
+                            }
+                        })?;
                 }
             }
         }
@@ -198,9 +240,10 @@ fn replace_upstream(
 /// Renvoie `false` quand le TUN est fermé côté système (révocation du VPN).
 fn drain_tun(
     tun: &mut File,
+    registry: &Registry,
     buf: &mut [u8],
     out: &mut Vec<u8>,
-    resolver: &mut Resolver,
+    flows: &mut Flows,
     now: Instant,
     stats: &Stats,
 ) -> io::Result<bool> {
@@ -218,42 +261,64 @@ fn drain_tun(
         let parsed = ip::parse(raw);
         stats.record(&parsed, n);
         if let Ok(packet) = parsed
-            && handle(&packet, resolver, now, stats, out)
+            && handle(raw, &packet, registry, flows, now, stats, out)
         {
             write_tun(tun, out);
         }
     }
 }
 
-/// Seul le trafic destiné au résolveur local reçoit une réponse ; renvoie `true` si `out` est à écrire.
+fn is_resolver(addr: IpAddr) -> bool {
+    addr == IpAddr::V4(DNS_V4) || addr == IpAddr::V6(DNS_V6)
+}
+
+/// Verdict d'un paquet sortant (spec §6) ; renvoie `true` si `out` contient une réponse à écrire dans le TUN.
 fn handle(
+    raw: &[u8],
     packet: &ip::IpPacket<'_>,
-    resolver: &mut Resolver,
+    registry: &Registry,
+    flows: &mut Flows,
     now: Instant,
     stats: &Stats,
     out: &mut Vec<u8>,
 ) -> bool {
-    if packet.dst != IpAddr::V4(DNS_V4) && packet.dst != IpAddr::V6(DNS_V6) {
-        return false;
-    }
     match packet.protocol {
         ip::PROTO_UDP => {
             let Ok(datagram) = udp::parse(packet) else {
                 return false;
             };
-            if datagram.dst.port() != 53 {
-                return false;
-            }
-            match resolver.handle_query(&datagram, now, stats) {
-                Outcome::Reply(msg) => udp::build(datagram.dst, datagram.src, &msg, out).is_ok(),
-                Outcome::Forwarded | Outcome::Dropped => false,
+            match datagram.dst.port() {
+                // Tout DNS en clair, quelle que soit sa destination, est servi par le résolveur local (DNAT) :
+                // un DNS codé en dur dans une app ne contourne pas le filtrage. La réponse garde l'IP visée.
+                DNS_PORT => match flows.resolver.handle_query(&datagram, now, stats) {
+                    Outcome::Reply(msg) => {
+                        udp::build(datagram.dst, datagram.src, &msg, out).is_ok()
+                    }
+                    Outcome::Forwarded | Outcome::Dropped => false,
+                },
+                _ if is_resolver(datagram.dst.ip()) => false,
+                // QUIC (443) et DNS-over-QUIC (853) : refus immédiat, le client se replie sur TCP où le SNI est lisible.
+                HTTPS_PORT | DOT_PORT => {
+                    stats.add(Counter::QuicBlocked, 1);
+                    icmp::build_port_unreachable(raw, packet, out).is_ok()
+                }
+                _ => {
+                    flows.nat.send(registry, &datagram, now, stats);
+                    false
+                }
             }
         }
-        // DoT (853) ou DNS/TCP : RST immédiat, Private DNS « automatique » se replie aussitôt sur UDP/53.
-        ip::PROTO_TCP => tcp::parse(packet)
-            .ok()
-            .and_then(|segment| tcp::build_reset(&segment, out))
-            .is_some_and(|built| built.is_ok()),
+        ip::PROTO_TCP => {
+            let Ok(segment) = tcp::parse(packet) else {
+                return false;
+            };
+            // DNS/TCP ou DoT vers le résolveur, et DoT vers tout autre serveur : RST. Private DNS « automatique »
+            // se replie aussitôt sur UDP/53 ; en mode strict la résolution échoue, ce qui reste visible (alerte J4).
+            if is_resolver(segment.dst.ip()) || segment.dst.port() == DOT_PORT {
+                return tcp::build_reset(&segment, out).is_some_and(|built| built.is_ok());
+            }
+            false
+        }
         _ => false,
     }
 }
@@ -301,13 +366,19 @@ mod tests {
         out
     }
 
+    fn config(list: &str, protect: bool) -> Config {
+        Config {
+            blocklist: Blocklist::from_domains(list),
+            protector: Arc::new(move |_| protect),
+        }
+    }
+
     // Une paire de sockets datagramme reproduit la sémantique du TUN : un paquet par lecture.
     fn start(list: &str) -> (UnixDatagram, Engine) {
         let (app, engine_side) = UnixDatagram::pair().unwrap();
         engine_side.set_nonblocking(true).unwrap();
         app.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        let engine =
-            Engine::start(OwnedFd::from(engine_side), Blocklist::from_domains(list)).unwrap();
+        let engine = Engine::start(OwnedFd::from(engine_side), config(list, true)).unwrap();
         (app, engine)
     }
 
@@ -469,15 +540,195 @@ mod tests {
     }
 
     #[test]
-    fn drops_everything_else() {
+    fn drops_tcp_until_the_userspace_stack_lands() {
         let (app, engine) = start("");
         let mut packet = Vec::new();
-        udp::build(sa(CLIENT), sa("93.184.216.34:443"), &[0; 32], &mut packet).unwrap();
+        let tcp = [
+            0x9c,
+            0x40,
+            0x00,
+            0x50,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0x50,
+            tcp::SYN,
+            0xff,
+            0xff,
+            0,
+            0,
+            0,
+            0,
+        ];
+        ip::build(
+            sa(CLIENT).ip(),
+            "93.184.216.34".parse().unwrap(),
+            ip::PROTO_TCP,
+            &tcp,
+            &mut packet,
+        )
+        .unwrap();
         app.send(&packet).unwrap();
         app.send(&[0x45, 0x00]).unwrap();
         wait_for(engine.stats(), Counter::Packets, 2);
         assert_eq!(engine.stats().get(Counter::Malformed), 1);
         assert_silent(&app);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn answers_dns_sent_to_any_server_locally_from_that_server() {
+        let (app, engine) = start("ads.example.net");
+        let mut packet = Vec::new();
+        udp::build(
+            sa(CLIENT),
+            sa("8.8.8.8:53"),
+            &dns_query(9, "ads.example.net", 1),
+            &mut packet,
+        )
+        .unwrap();
+        app.send(&packet).unwrap();
+
+        let mut buf = [0u8; 512];
+        let n = app.recv(&mut buf).unwrap();
+        let reply = ip::parse(&buf[..n]).unwrap();
+        let datagram = udp::parse(&reply).unwrap();
+        assert_eq!(
+            datagram.src,
+            sa("8.8.8.8:53"),
+            "le client doit croire parler au serveur visé"
+        );
+        assert_eq!(rcode(datagram.payload), 3);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn refuses_quic_with_port_unreachable() {
+        let (app, engine) = start("");
+        let mut packet = Vec::new();
+        udp::build(
+            sa(CLIENT),
+            sa("142.250.0.1:443"),
+            &[0xc3; 1200],
+            &mut packet,
+        )
+        .unwrap();
+        app.send(&packet).unwrap();
+
+        let mut buf = [0u8; 2048];
+        let n = app.recv(&mut buf).unwrap();
+        let reply = ip::parse(&buf[..n]).unwrap();
+        assert_eq!(reply.protocol, ip::PROTO_ICMP);
+        assert_eq!(&reply.payload[..2], &[3, 3]);
+        assert_eq!(engine.stats().get(Counter::QuicBlocked), 1);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn resets_dot_to_third_party_server() {
+        let (app, engine) = start("");
+        let tcp = [
+            0x9c,
+            0x40,
+            0x03,
+            0x55,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0x50,
+            tcp::SYN,
+            0xff,
+            0xff,
+            0,
+            0,
+            0,
+            0,
+        ];
+        let mut packet = Vec::new();
+        ip::build(
+            sa(CLIENT).ip(),
+            "1.1.1.1".parse().unwrap(),
+            ip::PROTO_TCP,
+            &tcp,
+            &mut packet,
+        )
+        .unwrap();
+        app.send(&packet).unwrap();
+
+        let mut buf = [0u8; 128];
+        let n = app.recv(&mut buf).unwrap();
+        let segment = tcp::parse(&ip::parse(&buf[..n]).unwrap()).unwrap();
+        assert_eq!(segment.flags, tcp::RST | tcp::ACK);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn relays_udp_through_protected_socket_both_ways() {
+        let (app, engine) = start("");
+        let remote = UdpSocket::bind("127.0.0.1:0").unwrap();
+        remote
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut packet = Vec::new();
+        udp::build(
+            sa(CLIENT),
+            remote.local_addr().unwrap(),
+            b"ping",
+            &mut packet,
+        )
+        .unwrap();
+        app.send(&packet).unwrap();
+
+        let mut buf = [0u8; 64];
+        let (n, from) = remote.recv_from(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"ping");
+        remote.send_to(b"pong", from).unwrap();
+
+        let mut buf = [0u8; 128];
+        let n = app.recv(&mut buf).unwrap();
+        let reply = ip::parse(&buf[..n]).unwrap();
+        let datagram = udp::parse(&reply).unwrap();
+        assert_eq!(datagram.src, remote.local_addr().unwrap());
+        assert_eq!(datagram.dst, sa(CLIENT));
+        assert_eq!(datagram.payload, b"pong");
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn never_sends_through_an_unprotected_socket() {
+        let (app, engine_side) = UnixDatagram::pair().unwrap();
+        engine_side.set_nonblocking(true).unwrap();
+        let engine = Engine::start(OwnedFd::from(engine_side), config("", false)).unwrap();
+        let remote = UdpSocket::bind("127.0.0.1:0").unwrap();
+        remote
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut packet = Vec::new();
+        udp::build(
+            sa(CLIENT),
+            remote.local_addr().unwrap(),
+            b"leak?",
+            &mut packet,
+        )
+        .unwrap();
+        app.send(&packet).unwrap();
+
+        wait_for(engine.stats(), Counter::UdpNatFailures, 1);
+        let mut buf = [0u8; 16];
+        assert!(
+            remote.recv_from(&mut buf).is_err(),
+            "aucun octet ne doit sortir sans protect()"
+        );
         engine.stop().unwrap();
     }
 
@@ -501,7 +752,7 @@ mod tests {
     fn exits_when_tun_is_closed() {
         // Un pipe signale la fermeture par une lecture de 0 octet, comme le TUN révoqué.
         let (reader, writer) = std::io::pipe().unwrap();
-        let engine = Engine::start(OwnedFd::from(reader), Blocklist::empty()).unwrap();
+        let engine = Engine::start(OwnedFd::from(reader), config("", true)).unwrap();
         drop(writer);
         let deadline = Instant::now() + Duration::from_secs(5);
         while !engine.thread.as_ref().unwrap().is_finished() {

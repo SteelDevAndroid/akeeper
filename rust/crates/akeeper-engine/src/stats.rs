@@ -15,9 +15,11 @@ pub enum Counter {
     DnsQueries = 6,
     DnsBlocked = 7,
     DnsUpstreamFailures = 8,
+    QuicBlocked = 9,
+    UdpNatFailures = 10,
 }
 
-const COUNTERS: usize = 9;
+const COUNTERS: usize = 11;
 
 impl Counter {
     pub fn from_index(index: i32) -> Option<Self> {
@@ -31,6 +33,8 @@ impl Counter {
             6 => Self::DnsQueries,
             7 => Self::DnsBlocked,
             8 => Self::DnsUpstreamFailures,
+            9 => Self::QuicBlocked,
+            10 => Self::UdpNatFailures,
             _ => return None,
         })
     }

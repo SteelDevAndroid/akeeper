@@ -71,7 +71,7 @@ public final class ShieldVpnService extends VpnService {
             return false;
         }
         try {
-            engine = NativeEngine.start(tun.detachFd(), openBlocklist());
+            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), this::protect);
         } catch (IllegalStateException e) {
             return false;
         }

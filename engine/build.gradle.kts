@@ -4,6 +4,7 @@ plugins {
 
 android {
     namespace = "com.akeeper.engine"
+    defaultConfig.consumerProguardFiles("consumer-rules.pro")
 }
 
 androidComponents {
