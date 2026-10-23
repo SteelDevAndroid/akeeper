@@ -44,5 +44,10 @@
         <item name="trackDecorationTint">@color/akeeper_switch_track_decoration</item>
     </style>
 
+    <style name="Widget.AKeeper.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/akeeper_card</item>
+        <item name="cardCornerRadius">24dp</item>
+        <item name="cardElevation">0dp</item>
+    </style>
 
 </resources>

@@ -7,5 +7,5 @@ android {
 }
 
 dependencies {
-    implementation(project(":engine"))
+    api(project(":engine"))
 }

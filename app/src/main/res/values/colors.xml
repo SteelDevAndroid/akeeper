@@ -27,7 +27,6 @@
     <color name="akeeper_outline_variant">@color/akeeper_sand</color>
     <color name="akeeper_switch_track_off">@color/akeeper_paper</color>
     <color name="akeeper_switch_thumb_off">@color/akeeper_taupe</color>
-    <color name="akeeper_scrim">#8C0B1838</color>
 
     <!-- États de sécurité : usage exclusif (statut de protection), toujours avec icône et libellé. -->
     <color name="akeeper_state_ok">#FF17703F</color>

@@ -75,6 +75,7 @@ public final class ShieldVpnService extends VpnService {
         } catch (IllegalStateException e) {
             return false;
         }
+        ShieldStatus.attach(engine);
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
                 this::followUnderlying);
         upstream.start(new Handler(Looper.getMainLooper()));
@@ -120,6 +121,7 @@ public final class ShieldVpnService extends VpnService {
             upstream = null;
         }
         if (engine != null) {
+            ShieldStatus.detach();
             engine.close();
             engine = null;
         }

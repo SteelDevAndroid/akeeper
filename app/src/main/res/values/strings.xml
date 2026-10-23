@@ -1,4 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="fr">
     <string name="app_name" translatable="false">aKeeper</string>
+
+    <string name="onboarding_step">Étape %1$d sur %2$d</string>
+    <string name="action_continue">Continuer</string>
+    <string name="action_later">Plus tard</string>
+
+    <string name="disclosure_title">aKeeper filtre le trafic de vos apps, directement sur votre téléphone</string>
+    <string name="disclosure_block">Bloque publicités, traqueurs et sites malveillants.</string>
+    <string name="disclosure_choose">Vous choisissez quelles apps accèdent à Internet.</string>
+    <string name="disclosure_local">Tout est traité localement : aucun trafic n\'est envoyé à nos serveurs.</string>
+    <string name="disclosure_data">Données traitées : domaines consultés et app à l\'origine de chaque connexion, conservés au plus 7 jours sur l\'appareil. Aucun contenu de page, aucun mot de passe, aucun envoi vers un serveur.</string>
+
+    <string name="consent_title">Autoriser la connexion VPN</string>
+    <string name="consent_body">Android va vous demander d\'autoriser une connexion VPN. aKeeper l\'utilise pour filtrer le trafic localement, pas pour le faire passer par un serveur.</string>
+    <string name="consent_refused">Sans cette autorisation, aKeeper ne peut pas fonctionner.</string>
+    <string name="consent_allow">Autoriser</string>
+    <string name="consent_retry">Réessayer</string>
+
+    <string name="notifications_title">Être alerté si la protection s\'arrête</string>
+    <string name="notifications_body">aKeeper vous prévient immédiatement si une autre app VPN prend la main ou si le verrouillage est désactivé.</string>
+    <string name="notifications_enable">Activer les notifications</string>
+
+    <string name="lockdown_title">Dernière étape : le verrouillage</string>
+    <string name="lockdown_body">Si aKeeper s\'arrête, Android bloque Internet au lieu de laisser passer le trafic sans filtrage.\n\n1. Touchez la roue dentée à côté d\'aKeeper\n2. Activez « VPN permanent »\n3. Activez « Bloquer les connexions sans VPN »</string>
+    <string name="lockdown_always_on">VPN permanent</string>
+    <string name="lockdown_block">Connexions sans VPN bloquées</string>
+    <string name="lockdown_enabled">Activé</string>
+    <string name="lockdown_pending">En attente</string>
+    <string name="lockdown_hint">L\'état est vérifié automatiquement à votre retour dans aKeeper.</string>
+    <string name="lockdown_open_settings">Ouvrir les réglages VPN</string>
+
+    <string name="home_level_ok">Protégé</string>
+    <string name="home_level_warn">Protection partielle</string>
+    <string name="home_level_danger">Non protégé</string>
+    <string name="home_protected_title">Protégé</string>
+    <string name="home_protected_sub">Verrouillage actif. Les requêtes DNS de vos apps sont filtrées.</string>
+    <string name="home_no_lockdown_title">Protégé, mais sans verrouillage</string>
+    <string name="home_no_lockdown_sub">Si aKeeper s\'arrête, le trafic passera sans filtrage.</string>
+    <string name="home_no_lockdown_action">Activer le verrouillage</string>
+    <string name="home_revoked_title">Protection désactivée par une autre app VPN</string>
+    <string name="home_revoked_sub">Le trafic de vos apps n\'est plus filtré.</string>
+    <string name="home_stopped_title">Protection arrêtée</string>
+    <string name="home_stopped_sub">Le service ne tourne pas.</string>
+    <string name="home_reactivate">Réactiver</string>
+    <string name="home_since_start">Depuis le démarrage de la protection</string>
+    <string name="home_dns_queries">requêtes DNS</string>
+    <string name="home_dns_blocked">requêtes bloquées</string>
+    <string name="home_notifications_title">Notifications désactivées</string>
+    <string name="home_notifications_body">Vous ne serez pas alerté si la protection s\'arrête.</string>
 </resources>

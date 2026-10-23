@@ -12,6 +12,15 @@ Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. 
 - Versions retenues : AGP 9.4.1, Gradle 9.8.1, NDK 30.0.16248370, JUnit 5.14.4, Mockito 5.24.0, AssertJ 3.27.7, Material 1.14.0. Le Kotlin intégré d'AGP 9 est désactivé (modules 100 % Java).
 - L'audit `cargo-deny` n'est pas encore dans la CI : il faut d'abord écrire sa politique (`deny.toml`).
 
+**J1 livré (VPN DNS seul)** : moteur (résolveur filtrant), service et onboarding + accueil. Écarts et points ouverts :
+
+- **Résolveurs amont** : Java crée et protège un socket UDP connecté par serveur DNS du réseau sous-jacent, puis le cède au moteur (`setUpstream`). Le moteur n'a donc pas besoin de rappeler Java pour `protect()` : le `Host` JNI reste reporté à J2, où chaque flux sortant devra être protégé.
+- **Liste de blocage** : en J1, c'est un simple fichier texte (`filesDir/blocklist.txt`) transformé en FST au démarrage. Il n'existe encore ni liste par défaut ni écran pour l'éditer : les catégories arrivent avec les bundles signés (J5) et l'écran avec R2. Le texte de divulgation O1 promet donc plus que J1 ne fait.
+- **Pas encore livrés** : l'écran O6 (guide OEM), la pause, l'alerte « DNS privé strict » (J4) et les compteurs « aujourd'hui ». L'accueil affiche les compteurs depuis le démarrage du moteur.
+- **À valider sur appareil**, faute d'émulateur dans l'environnement de build :
+  - le comportement du verrouillage (*Bloquer les connexions sans VPN*) avec des routes limitées au résolveur. Si Android bloque alors tout le trafic hors tunnel, l'étape O4 bloquante doit attendre le tunnel complet (J2) ;
+  - le repli rapide de Private DNS « automatique » grâce au RST TCP.
+
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 
 ## 1. Décisions structurantes
