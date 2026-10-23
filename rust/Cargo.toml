@@ -21,10 +21,13 @@ panic = "deny"
 [workspace.dependencies]
 akeeper-proto = { path = "crates/akeeper-proto" }
 akeeper-engine = { path = "crates/akeeper-engine" }
-mio = { version = "1.2", features = ["os-poll", "os-ext"] }
+mio = { version = "1.2", features = ["os-poll", "os-ext", "net"] }
 libc = "0.2"
 fst = "0.4"
 getrandom = "0.3"
+jni = "0.21"
+smoltcp = { version = "0.14", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "proto-ipv6", "socket-tcp"] }
+socket2 = "0.6"
 
 [profile.release]
 lto = "fat"

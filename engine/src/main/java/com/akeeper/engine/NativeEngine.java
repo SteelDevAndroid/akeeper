@@ -5,8 +5,8 @@ import android.os.ParcelFileDescriptor;
 import java.io.IOException;
 
 /**
- * Moteur natif propriétaire du fd TUN. Jalon J1 : résolveur DNS local filtrant ; tout autre paquet
- * est abandonné, rien ne ressort du tunnel sans verdict explicite.
+ * Moteur natif propriétaire du fd TUN : résolveur DNS local filtrant, NAT UDP protégé, neutralisation
+ * de l'évasion. Tout paquet sans verdict explicite est abandonné.
  */
 public final class NativeEngine implements AutoCloseable {
 
@@ -19,7 +19,22 @@ public final class NativeEngine implements AutoCloseable {
 
     /** Indices partagés avec {@code akeeper_engine::Counter} : l'ordre fait partie du contrat JNI. */
     public enum Counter {
-        PACKETS, BYTES, MALFORMED, TCP, UDP, ICMP, DNS_QUERIES, DNS_BLOCKED, DNS_UPSTREAM_FAILURES
+        PACKETS, BYTES, MALFORMED, TCP, UDP, ICMP, DNS_QUERIES, DNS_BLOCKED, DNS_UPSTREAM_FAILURES,
+        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES, APP_BLOCKED
+    }
+
+    /** Rappelé par le thread natif, une fois par socket ou par nouveau flux : doit rester rapide. */
+    public interface Host {
+        /** {@code VpnService.protect(int)} : exclut ce socket du tunnel. */
+        boolean protect(int fd);
+
+        /**
+         * UID de l'app propriétaire de la connexion ({@code getConnectionOwnerUid}), -1 si inconnu.
+         *
+         * @param protocol {@code IPPROTO_TCP} ou {@code IPPROTO_UDP}
+         * @param localAddress adresse brute (4 ou 16 octets) côté app
+         */
+        int ownerUid(int protocol, byte[] localAddress, int localPort, byte[] remoteAddress, int remotePort);
     }
 
     // Garde par le moniteur : un appel natif pendant close() utiliserait la mémoire libérée (use-after-free).
@@ -33,9 +48,10 @@ public final class NativeEngine implements AutoCloseable {
      * Le moteur prend possession des deux fd détachés et les ferme, y compris en cas d'échec.
      *
      * @param blocklistFd liste de domaines, un par ligne ; -1 pour une liste vide
+     * @param host        référencé par le moteur jusqu'à {@link #close()}
      */
-    public static NativeEngine start(int detachedTunFd, int blocklistFd) {
-        long h = nativeStart(detachedTunFd, blocklistFd);
+    public static NativeEngine start(int detachedTunFd, int blocklistFd, Host host) {
+        long h = nativeStart(detachedTunFd, blocklistFd, host);
         if (h == 0) {
             throw new IllegalStateException("Démarrage du moteur natif impossible");
         }
@@ -54,6 +70,11 @@ public final class NativeEngine implements AutoCloseable {
             return false;
         }
         return nativeSetUpstream(handle, slot, detachedSocketFd) == 0;
+    }
+
+    /** Prive d'Internet les UID donnés (pare-feu par app) ; leurs connexions ouvertes sont coupées. */
+    public synchronized boolean setBlockedUids(int[] uids) {
+        return handle != 0 && nativeSetBlockedUids(handle, uids) == 0;
     }
 
     /** Renvoie -1 une fois le moteur arrêté. */
@@ -79,9 +100,11 @@ public final class NativeEngine implements AutoCloseable {
         }
     }
 
-    private static native long nativeStart(int tunFd, int blocklistFd);
+    private static native long nativeStart(int tunFd, int blocklistFd, Host host);
 
     private static native int nativeSetUpstream(long handle, int slot, int fd);
+
+    private static native int nativeSetBlockedUids(long handle, int[] uids);
 
     private static native long nativeCounter(long handle, int counter);
 

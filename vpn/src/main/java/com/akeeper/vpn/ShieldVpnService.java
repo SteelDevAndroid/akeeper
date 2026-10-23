@@ -14,6 +14,8 @@ import com.akeeper.engine.NativeEngine;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 
 /** Toutes les méthodes s'exécutent sur le thread principal : aucun champ n'est partagé entre threads. */
 public final class ShieldVpnService extends VpnService {
@@ -25,6 +27,7 @@ public final class ShieldVpnService extends VpnService {
 
     private NativeEngine engine;
     private UpstreamDns upstream;
+    private ShieldStatus.Subscription appRules;
 
     /** Prérequis : {@link VpnService#prepare} a renvoyé {@code null} (consentement accordé). */
     public static void start(Context context) {
@@ -58,28 +61,64 @@ public final class ShieldVpnService extends VpnService {
                 .setMtu(1500)
                 .addAddress("10.111.0.1", 32)
                 .addAddress("fd00:6d73::1", 128)
-                // J1 : seul le résolveur local passe par le tunnel ; J2 routera 0.0.0.0/0 et ::/0.
-                .addRoute(DNS_V4, 32)
-                .addRoute(DNS_V6, 128)
+                // Tunnel complet : ::/0 explicite, sinon l'IPv6 (464XLAT, réseaux v6 seuls) sortirait en clair.
+                .addRoute("0.0.0.0", 0)
+                .addRoute("::", 0)
                 .addDnsServer(DNS_V4)
                 .addDnsServer(DNS_V6)
                 .setBlocking(false)
                 .setMetered(false);
+        // Aucune exclusion LAN : l'option opt-in (R1) n'existe pas encore, le LAN passe donc par le filtre.
 
         var tun = builder.establish();
         if (tun == null) {
             return false;
         }
         try {
-            engine = NativeEngine.start(tun.detachFd(), openBlocklist());
+            engine = NativeEngine.start(tun.detachFd(), openBlocklist(),
+                    new EngineHost(new FlowOwnerResolver(getSystemService(ConnectivityManager.class))));
         } catch (IllegalStateException e) {
             return false;
         }
         ShieldStatus.attach(engine);
+        applyAppRules();
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
                 this::followUnderlying);
         upstream.start(new Handler(Looper.getMainLooper()));
         return true;
+    }
+
+    private void applyAppRules() {
+        try {
+            // Moteur capturé : l'observateur tourne sur le thread de l'UI qui écrit les règles, pendant qu'un
+            // arrêt peut remettre le champ à null. Après close(), setBlockedUids() est simplement sans effet.
+            var current = engine;
+            appRules = AppRules.get(this).observe(packages ->
+                    current.setBlockedUids(AppRules.uids(getPackageManager(), packages)));
+        } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+            // Keystore indisponible : aucune règle par app, mais le filtrage DNS et l'anti-évasion restent actifs.
+            appRules = null;
+        }
+    }
+
+    /** Appelé depuis le thread natif : protect() et getConnectionOwnerUid() sont sûrs hors thread principal. */
+    private final class EngineHost implements NativeEngine.Host {
+
+        private final FlowOwnerResolver resolver;
+
+        EngineHost(FlowOwnerResolver resolver) {
+            this.resolver = resolver;
+        }
+
+        @Override
+        public boolean protect(int fd) {
+            return ShieldVpnService.this.protect(fd);
+        }
+
+        @Override
+        public int ownerUid(int protocol, byte[] localAddress, int localPort, byte[] remoteAddress, int remotePort) {
+            return resolver.ownerUid(protocol, localAddress, localPort, remoteAddress, remotePort);
+        }
     }
 
     private void followUnderlying(Network network) {
@@ -116,6 +155,10 @@ public final class ShieldVpnService extends VpnService {
     }
 
     private void shutdown() {
+        if (appRules != null) {
+            appRules.close();
+            appRules = null;
+        }
         if (upstream != null) {
             upstream.close();
             upstream = null;

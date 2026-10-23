@@ -15,6 +15,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -25,6 +26,7 @@ import com.akeeper.ui.OnboardingFlow.Facts;
 import com.akeeper.ui.OnboardingFlow.Step;
 import com.akeeper.vpn.ShieldStatus;
 import com.akeeper.vpn.ShieldVpnService;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 
@@ -32,12 +34,13 @@ import java.io.File;
 import java.io.IOException;
 import java.text.NumberFormat;
 
-/** Activité unique : onboarding (O1 à O4) puis accueil (A1). Tout s'exécute sur le thread principal. */
+/** Activité unique : onboarding (O1 à O4) puis onglets Accueil (A1) et Apps (A2). Thread principal uniquement. */
 public final class MainActivity extends AppCompatActivity {
 
     private static final String STATE_DISCLOSURE = "disclosure_accepted";
     private static final String STATE_NOTIFICATIONS_ASKED = "notifications_asked";
     private static final String STATE_CONSENT_REFUSED = "consent_refused";
+    private static final String STATE_APPS_TAB = "apps_tab";
     // Marqueur dans noBackupFilesDir : jamais sauvegardé ni transféré, aucune donnée sensible.
     private static final String ONBOARDING_MARKER = "onboarding_done";
     private static final int ONBOARDING_STEPS = 4;
@@ -63,15 +66,27 @@ public final class MainActivity extends AppCompatActivity {
     private boolean notificationsAsked;
     private boolean consentRefused;
     private Step shown;
+    private int shownLayout;
+    private boolean appsTab;
+    private AppsScreen appsScreen;
+    // Retour depuis l'onglet Apps : revient à l'accueil au lieu de quitter l'app.
+    private final OnBackPressedCallback backToHome = new OnBackPressedCallback(false) {
+        @Override
+        public void handleOnBackPressed() {
+            selectTab(false);
+        }
+    };
     private ShieldStatus.Subscription subscription;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getOnBackPressedDispatcher().addCallback(this, backToHome);
         if (savedInstanceState != null) {
             disclosureAccepted = savedInstanceState.getBoolean(STATE_DISCLOSURE);
             notificationsAsked = savedInstanceState.getBoolean(STATE_NOTIFICATIONS_ASKED);
             consentRefused = savedInstanceState.getBoolean(STATE_CONSENT_REFUSED);
+            appsTab = savedInstanceState.getBoolean(STATE_APPS_TAB);
         }
     }
 
@@ -81,6 +96,7 @@ public final class MainActivity extends AppCompatActivity {
         outState.putBoolean(STATE_DISCLOSURE, disclosureAccepted);
         outState.putBoolean(STATE_NOTIFICATIONS_ASKED, notificationsAsked);
         outState.putBoolean(STATE_CONSENT_REFUSED, consentRefused);
+        outState.putBoolean(STATE_APPS_TAB, appsTab);
     }
 
     @Override
@@ -109,6 +125,9 @@ public final class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         subscription.close();
+        closeAppsScreen();
+        // Force la reconstruction de l'écran au retour : l'écran Apps vient d'être libéré.
+        shownLayout = 0;
         super.onStop();
     }
 
@@ -119,17 +138,56 @@ public final class MainActivity extends AppCompatActivity {
         if (step == Step.HOME && !marker.exists()) {
             markOnboardingDone(marker);
         }
-        if (step != shown) {
-            setContentView(step == Step.HOME ? R.layout.screen_home : R.layout.screen_onboarding);
-            applySystemBarInsets(findViewById(R.id.root));
-            shown = step;
+        int layout = step != Step.HOME ? R.layout.screen_onboarding
+                : appsTab ? R.layout.screen_apps : R.layout.screen_home;
+        if (layout != shownLayout) {
+            closeAppsScreen();
+            setContentView(layout);
+            View root = findViewById(R.id.root);
+            applySystemBarInsets(root);
+            shownLayout = layout;
+            if (step == Step.HOME) {
+                bindBottomNav();
+            }
+            if (layout == R.layout.screen_apps) {
+                appsScreen = new AppsScreen(this, root);
+            }
         }
+        shown = step;
+        backToHome.setEnabled(step == Step.HOME && appsTab);
         switch (step) {
             case DISCLOSURE -> renderDisclosure();
             case VPN_CONSENT -> renderConsent();
             case NOTIFICATIONS -> renderNotifications();
             case LOCKDOWN -> renderLockdown();
-            case HOME -> renderHome();
+            case HOME -> {
+                if (!appsTab) {
+                    renderHome();
+                }
+            }
+        }
+    }
+
+    private void bindBottomNav() {
+        BottomNavigationView nav = findViewById(R.id.bottom_nav);
+        nav.setSelectedItemId(appsTab ? R.id.nav_apps : R.id.nav_home);
+        nav.setOnItemSelectedListener(item -> {
+            selectTab(item.getItemId() == R.id.nav_apps);
+            return true;
+        });
+    }
+
+    private void selectTab(boolean apps) {
+        if (apps != appsTab) {
+            appsTab = apps;
+            render();
+        }
+    }
+
+    private void closeAppsScreen() {
+        if (appsScreen != null) {
+            appsScreen.close();
+            appsScreen = null;
         }
     }
 
@@ -263,7 +321,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void renderCounters() {
-        if (shown != Step.HOME) {
+        if (shownLayout != R.layout.screen_home) {
             return;
         }
         var blocked = ShieldStatus.counter(NativeEngine.Counter.DNS_BLOCKED);

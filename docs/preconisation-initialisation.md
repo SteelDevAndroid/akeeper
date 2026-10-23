@@ -21,6 +21,39 @@ Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. 
   - le comportement du verrouillage (*Bloquer les connexions sans VPN*) avec des routes limitées au résolveur. Si Android bloque alors tout le trafic hors tunnel, l'étape O4 bloquante doit attendre le tunnel complet (J2) ;
   - le repli rapide de Private DNS « automatique » grâce au RST TCP.
 
+**J2 livré (tunnel complet)** :
+- **Routes** : `0.0.0.0/0` et `::/0`.
+- **TCP** : terminaison en espace utilisateur (smoltcp, `any_ip`) et relais par sockets protégés. Pas de MITM.
+- **UDP** : NAT protégé.
+- **DNS** : tout DNS en clair est intercepté (DNAT vers le résolveur local).
+- **QUIC et DoQ** : refusés par ICMP « port inaccessible ».
+- **DoT** : RST vers tout serveur.
+- **`protect()`** : il passe par un rappel JNI vers `NativeEngine.Host`. Un socket que le système refuse de protéger n'émet jamais.
+
+Écarts et limites :
+- **Réseau local** : pas d'exclusion LAN, l'option opt-in (R1) n'existe pas encore, et `AdvancedProtectionPolicy` n'est donc pas encore branchée. Tout le LAN passe par le filtre, ce qui reste le comportement par défaut voulu.
+- **Fragments IPv4** : abandonnés, au risque de casser de rares protocoles UDP qui envoient des datagrammes de plus de 1 472 octets.
+- **DNS/TCP vers le résolveur** : réinitialisé. Une réponse DNS tronquée en UDP échoue donc au lieu de se replier sur TCP.
+- **ICMP** : ni relayé ni répondu, donc `ping` ne fonctionne pas.
+- **Sans attribution** : attribution UID et pare-feu par app viennent en J3.
+- **Non validé sur appareil**, faute d'émulateur dans l'environnement de build :
+  - débit, latence et consommation batterie du relais ;
+  - comportement avec le verrouillage, désormais sans objet pour le trafic hors tunnel puisque tout est routé ;
+  - réseaux IPv6 seuls et 464XLAT ;
+  - survie sous Doze.
+- **Rappel JNI `protect()`** : non testé hors appareil, les tests Rust injectent un `Protector` en mémoire.
+
+**J3 livré (pare-feu par app)** :
+- **Attribution** : l'UID de chaque nouveau flux est résolu une seule fois, puis gardé dans la table de flux du moteur.
+- **Blocage** : RST côté TCP et ICMP « port inaccessible » côté UDP. Les flux déjà ouverts sont coupés au changement de règle.
+- **Écran Apps (A2)** : recherche, filtres Toutes / Bloquées / Système, interrupteur avec « Annuler », confirmation pour une app système. Les apps à UID partagé sont basculées ensemble.
+- **Persistance** : `AppRules`, chiffré par Tink.
+- **Liste complète** : obtenue via `QUERY_ALL_PACKAGES`, qui doit être déclarée dans la Play Console.
+
+Pas encore livrés :
+- le détail d'app A3, le filtre « Récentes » et les volumes par app, faute de compteurs par UID ;
+- le recalcul des UID à l'installation d'une app pendant que le service tourne. Les UID sont recalculés au démarrage du service et à chaque modification des règles.
+
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 
 ## 1. Décisions structurantes
@@ -502,8 +535,8 @@ J1 sépare deux risques : le cycle de vie Android et la politique Play d'un côt
 ## 6. Écarts avec la spec à acter
 
 1. ~~Package `com.akeeper` au lieu de `com.aKeeper`.~~ **Acté** : spec mise à jour.
-2. `FlowOwnerResolver` sans cache Java : c'est `FlowTable` (Rust) qui met en cache, une seule résolution par flux.
-3. Préférences en `AtomicFile` + Tink `Aead` plutôt que DataStore, dont l'API coroutines est peu adaptée à une base Java.
+2. ~~`FlowOwnerResolver` sans cache Java : c'est `FlowTable` (Rust) qui met en cache, une seule résolution par flux.~~ **Acté** : l'UID est rangé dans l'entrée de flux du moteur (`TcpStack`, `UdpNat`).
+3. ~~Préférences en `AtomicFile` + Tink `Aead` plutôt que DataStore, dont l'API coroutines est peu adaptée à une base Java.~~ **Acté** : écriture atomique (fichier temporaire, fsync, rename) + Tink AEAD, voir `AppRules`.
 4. Bundle de règles en enveloppe binaire fixe + FST, sans protobuf.
 5. Extraction SNI QUIC Initial reportée après le MVP.
 6. Fuzzing nightly à 5 h 30 par cible sur runners hébergés. Les 24 h prévues exigent un runner auto-hébergé ou ClusterFuzzLite.

@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 akeeper-engine.workspace = true
 libc.workspace = true
+jni.workspace = true
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
