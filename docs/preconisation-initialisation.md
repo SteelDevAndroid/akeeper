@@ -480,7 +480,7 @@ J1 sépare deux risques : le cycle de vie Android et la politique Play d'un côt
 
 ## 6. Écarts avec la spec à acter
 
-1. Package `com.akeeper` au lieu de `com.aKeeper`.
+1. ~~Package `com.akeeper` au lieu de `com.aKeeper`.~~ **Acté** : spec mise à jour.
 2. `FlowOwnerResolver` sans cache Java : c'est `FlowTable` (Rust) qui met en cache, une seule résolution par flux.
 3. Préférences en `AtomicFile` + Tink `Aead` plutôt que DataStore, dont l'API coroutines est peu adaptée à une base Java.
 4. Bundle de règles en enveloppe binaire fixe + FST, sans protobuf.

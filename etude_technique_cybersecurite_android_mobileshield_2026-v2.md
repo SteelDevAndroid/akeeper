@@ -133,11 +133,11 @@ Java (Android)
 
 ```kotlin
 android {
-    namespace = "com.aKeeper"
+    namespace = "com.akeeper"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.aKeeper"
+        applicationId = "com.akeeper"
         minSdk = 36
         targetSdk = 36
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -234,7 +234,7 @@ dependencies {
         </trust-anchors>
     </base-config>
     <domain-config>
-        <domain includeSubdomains="false">rules.aKeeper.example</domain>
+        <domain includeSubdomains="false">rules.akeeper.example</domain>
         <pin-set expiration="2027-10-01">
             <!-- Clé publique de l'intermédiaire + clé de secours ; l'intégrité des règles repose sur Ed25519, pas sur ce pin. -->
             <pin digest="SHA-256">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</pin>
@@ -247,7 +247,7 @@ dependencies {
 ### `vpn/ShieldVpnService.java`
 
 ```java
-package com.aKeeper.vpn;
+package com.akeeper.vpn;
 
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -345,7 +345,7 @@ public final class ShieldVpnService extends VpnService {
 ### `vpn/ShieldPolicy.java`
 
 ```java
-package com.aKeeper.vpn;
+package com.akeeper.vpn;
 
 import android.net.IpPrefix;
 
@@ -366,7 +366,7 @@ public record ShieldPolicy(boolean allowLanBypass, List<IpPrefix> lanRoutes, boo
 ### `vpn/LockdownStatus.java`
 
 ```java
-package com.aKeeper.vpn;
+package com.akeeper.vpn;
 
 public record LockdownStatus(boolean alwaysOn, boolean lockdown, boolean revoked) {
 
@@ -385,7 +385,7 @@ public record LockdownStatus(boolean alwaysOn, boolean lockdown, boolean revoked
 ### `vpn/FlowOwnerResolver.java`
 
 ```java
-package com.aKeeper.vpn;
+package com.akeeper.vpn;
 
 import android.net.ConnectivityManager;
 
@@ -453,12 +453,12 @@ public final class FlowOwnerResolver {
 ### `security/AdvancedProtectionPolicy.java`
 
 ```java
-package com.aKeeper.security;
+package com.akeeper.security;
 
 import android.content.Context;
 import android.security.advancedprotection.AdvancedProtectionManager;
 
-import com.aKeeper.vpn.ShieldPolicy;
+import com.akeeper.vpn.ShieldPolicy;
 
 public final class AdvancedProtectionPolicy {
 
@@ -481,7 +481,7 @@ public final class AdvancedProtectionPolicy {
 ### `test/.../FlowOwnerResolverTest.java`
 
 ```java
-package com.aKeeper.vpn;
+package com.akeeper.vpn;
 
 import android.net.ConnectivityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -565,7 +565,7 @@ class FlowOwnerResolverTest {
 ### `test/.../LockdownStatusTest.java`
 
 ```java
-package com.aKeeper.vpn;
+package com.akeeper.vpn;
 
 import org.junit.jupiter.api.Test;
 

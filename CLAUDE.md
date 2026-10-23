@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). The repo currently contains **only the design spec**: `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French). No Gradle project, sources or Rust crate exist yet. That spec is the source of truth. Part I corrects earlier assumptions, Part II is the implementation spec with reference code for `build.gradle.kts`, the manifest, XML configs, the `vpn/` and `security/` classes and their tests. Scaffold from it rather than inventing structure, and update the spec when a design decision changes. `docs/preconisation-initialisation.md` refines the spec for the bootstrap: module split, Gradle/Cargo setup, CI, milestones, and the deviations from the spec to approve (lowercase package `com.akeeper`, the Rust `FlowTable` as the single flow cache, a fixed binary rule envelope with an FST payload).
+aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). The repo currently contains **only the design spec**: `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French). No Gradle project, sources or Rust crate exist yet. That spec is the source of truth. Part I corrects earlier assumptions, Part II is the implementation spec with reference code for `build.gradle.kts`, the manifest, XML configs, the `vpn/` and `security/` classes and their tests. Scaffold from it rather than inventing structure, and update the spec when a design decision changes. `docs/preconisation-initialisation.md` refines the spec for the bootstrap: module split, Gradle/Cargo setup, CI, milestones, and the deviations from the spec still to approve (the Rust `FlowTable` as the single flow cache, a fixed binary rule envelope with an FST payload). Package is `com.akeeper` (lowercase, approved).
 
 License: GPL-3.0. `.gitignore` is the standard Android Studio one (keystores and `google-services.json` are ignored).
 
 ## Planned build and test commands (once scaffolded)
 
-From the spec: Gradle Kotlin DSL, a single `app` module, namespace/applicationId `com.aKeeper`, Java 21, and JUnit 5 (`useJUnitPlatform()`) with Mockito and AssertJ.
+From the spec: Gradle Kotlin DSL, a single `app` module, namespace/applicationId `com.akeeper`, Java 21, and JUnit 5 (`useJUnitPlatform()`) with Mockito and AssertJ.
 
 ```bash
 ./gradlew assembleDebug
 ./gradlew :app:testDebugUnitTest
-./gradlew :app:testDebugUnitTest --tests 'com.aKeeper.vpn.FlowOwnerResolverTest'
+./gradlew :app:testDebugUnitTest --tests 'com.akeeper.vpn.FlowOwnerResolverTest'
 ```
 
 The native engine (Rust, through JNI) must be linked with `-C link-arg=-Wl,-z,max-page-size=16384`. CI checks 16 KB alignment with `zipalign -c -P 16 -v 4 <apk>` and `llvm-readelf -l` (every `LOAD` segment aligned ≥ 0x4000). Parser fuzzing uses `cargo-fuzz` in a nightly CI job.
@@ -30,7 +30,7 @@ TUN (10.111.0.1/32, fd00:6d73::1/128, routes 0.0.0.0/0 + ::/0)
 Java: ShieldVpnService · FlowOwnerResolver · RuleRepository (Room+SQLCipher) · RuleUpdater (WorkManager)
 ```
 
-Java packages: `com.aKeeper.vpn` (`ShieldVpnService`, `ShieldPolicy` record, `LockdownStatus` record, `FlowOwnerResolver`) and `com.aKeeper.security` (`AdvancedProtectionPolicy`).
+Java packages: `com.akeeper.vpn` (`ShieldVpnService`, `ShieldPolicy` record, `LockdownStatus` record, `FlowOwnerResolver`) and `com.akeeper.security` (`AdvancedProtectionPolicy`).
 
 ## Non-negotiable design constraints
 
