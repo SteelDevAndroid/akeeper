@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). The repo currently contains **only the design spec**: `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French). No Gradle project, sources or Rust crate exist yet. That spec is the source of truth. Part I corrects earlier assumptions, Part II is the implementation spec with reference code for `build.gradle.kts`, the manifest, XML configs, the `vpn/` and `security/` classes and their tests. Scaffold from it rather than inventing structure, and update the spec when a design decision changes.
+aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). The repo currently contains **only the design spec**: `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French). No Gradle project, sources or Rust crate exist yet. That spec is the source of truth. Part I corrects earlier assumptions, Part II is the implementation spec with reference code for `build.gradle.kts`, the manifest, XML configs, the `vpn/` and `security/` classes and their tests. Scaffold from it rather than inventing structure, and update the spec when a design decision changes. `docs/preconisation-initialisation.md` refines the spec for the bootstrap: module split, Gradle/Cargo setup, CI, milestones, and the deviations from the spec to approve (lowercase package `com.akeeper`, the Rust `FlowTable` as the single flow cache, a fixed binary rule envelope with an FST payload).
 
 License: GPL-3.0. `.gitignore` is the standard Android Studio one (keystores and `google-services.json` are ignored).
 
