@@ -33,3 +33,10 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Rust
+rust/target/
+rust/fuzz/target/
+rust/fuzz/corpus/
+rust/fuzz/artifacts/
+rust/fuzz/Cargo.lock

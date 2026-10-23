@@ -1,0 +1,23 @@
+[package]
+name = "akeeper-ffi"
+description = "Frontière JNI : seule crate contenant de l'unsafe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+akeeper-engine.workspace = true
+libc.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+undocumented_unsafe_blocks = "deny"

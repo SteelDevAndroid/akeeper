@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Charte : bleu nuit, turquoise, ivoire. -->
+    <color name="akeeper_midnight">#FF102453</color>
+    <color name="akeeper_midnight_deep">#FF0B1838</color>
+    <color name="akeeper_midnight_raised">#FF22386B</color>
+    <color name="akeeper_turquoise">#FF36C2CF</color>
+    <color name="akeeper_turquoise_text">#FF0B6B75</color>
+    <color name="akeeper_ivory">#FFF5EDE4</color>
+    <color name="akeeper_slate">#FF4A5675</color>
+    <color name="akeeper_mist">#FFB7C0D6</color>
+    <color name="akeeper_sand">#FFE2D8CC</color>
+    <color name="akeeper_paper">#FFEFE6DB</color>
+    <color name="akeeper_taupe">#FF8C8478</color>
+    <color name="akeeper_white">#FFFFFFFF</color>
+
+    <!-- Rôles, redéfinis dans values-night. -->
+    <color name="akeeper_background">@color/akeeper_ivory</color>
+    <color name="akeeper_on_background">@color/akeeper_midnight</color>
+    <color name="akeeper_on_background_variant">@color/akeeper_slate</color>
+    <color name="akeeper_card">@color/akeeper_white</color>
+    <color name="akeeper_primary">@color/akeeper_midnight</color>
+    <color name="akeeper_on_primary">@color/akeeper_ivory</color>
+    <!-- Turquoise jamais en texte sur fond clair (1,8:1) : variante foncée pour les liens (5,4:1). -->
+    <color name="akeeper_link">@color/akeeper_turquoise_text</color>
+    <color name="akeeper_outline">@color/akeeper_taupe</color>
+    <color name="akeeper_outline_variant">@color/akeeper_sand</color>
+    <color name="akeeper_switch_track_off">@color/akeeper_paper</color>
+    <color name="akeeper_switch_thumb_off">@color/akeeper_taupe</color>
+
+    <!-- États de sécurité : usage exclusif (statut de protection), toujours avec icône et libellé. -->
+    <color name="akeeper_state_ok">#FF17703F</color>
+    <color name="akeeper_state_ok_container">#FFDCEFE3</color>
+    <color name="akeeper_state_warn">#FF8A5A00</color>
+    <color name="akeeper_state_warn_container">#FFF8E7C2</color>
+    <color name="akeeper_state_danger">#FFB3261E</color>
+    <color name="akeeper_state_danger_container">#FFF7D9D6</color>
+</resources>

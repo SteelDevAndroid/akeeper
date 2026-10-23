@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="akeeper_background">@color/akeeper_midnight_deep</color>
+    <color name="akeeper_on_background">@color/akeeper_ivory</color>
+    <color name="akeeper_on_background_variant">@color/akeeper_mist</color>
+    <color name="akeeper_card">@color/akeeper_midnight</color>
+    <color name="akeeper_primary">@color/akeeper_turquoise</color>
+    <color name="akeeper_on_primary">@color/akeeper_midnight</color>
+    <color name="akeeper_link">@color/akeeper_turquoise</color>
+    <color name="akeeper_outline">@color/akeeper_mist</color>
+    <color name="akeeper_outline_variant">@color/akeeper_midnight_raised</color>
+    <color name="akeeper_switch_track_off">@color/akeeper_midnight_raised</color>
+    <color name="akeeper_switch_thumb_off">@color/akeeper_mist</color>
+
+    <color name="akeeper_state_ok">#FF6FD39A</color>
+    <color name="akeeper_state_ok_container">#FF173F35</color>
+    <color name="akeeper_state_warn">#FFF2B84B</color>
+    <color name="akeeper_state_warn_container">#FF3D3015</color>
+    <color name="akeeper_state_danger">#FFFF8A80</color>
+    <color name="akeeper_state_danger_container">#FF3F1E26</color>
+</resources>
