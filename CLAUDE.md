@@ -8,6 +8,7 @@ aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local 
 
 - `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French) is the source of truth. Part I corrects earlier assumptions; Part II is the implementation spec. Update it when a design decision changes.
 - `docs/preconisation-initialisation.md` refines it for the bootstrap. Deviations still to approve: the Rust `FlowTable` as the single flow cache, and a fixed binary rule envelope with an FST payload instead of protobuf.
+- `docs/listes-de-blocage.md` evaluates the blocklist sources. HaGeZi is retained, StevenBlack is excluded, URLhaus needs written permission from abuse.ch, and Phishing Army is retained pending a review of its upstream sources' terms. The plan is one prebuilt FST per category in the signed bundle.
 - `docs/ui-ecrans.md` specifies the screens. Green/amber/red (`akeeper_state_*` in `app/src/main/res/values*/colors.xml`) are reserved for the protection status; never use them for errors, "blocked" verdicts or destructive actions.
 - Package is `com.akeeper` (lowercase, approved).
 
