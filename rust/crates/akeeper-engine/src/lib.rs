@@ -1,9 +1,10 @@
-//! Moteur aKeeper : résolveur DNS local filtrant, NAT UDP protégé et neutralisation de l'évasion (spec §6).
+//! Moteur aKeeper : résolveur DNS local filtrant, relais TCP et UDP protégés, neutralisation de l'évasion (spec §6).
 //! Tout paquet sans verdict explicite est abandonné : rien ne ressort du tunnel par défaut (fail-closed).
 
 mod blocklist;
 mod dns;
 mod stats;
+mod tcp_stack;
 mod udp_nat;
 
 pub use blocklist::Blocklist;
@@ -24,6 +25,7 @@ use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Registry, Token, Waker};
 
 use dns::{Outcome, Resolver};
+use tcp_stack::TcpStack;
 use udp_nat::UdpNat;
 
 /// Adresses du résolveur local annoncées par `VpnService.Builder.addDnsServer` (spec §4).
@@ -78,7 +80,8 @@ impl Engine {
                 move || {
                     let flows = Flows {
                         resolver: Resolver::new(config.blocklist),
-                        nat: UdpNat::new(config.protector),
+                        nat: UdpNat::new(Arc::clone(&config.protector)),
+                        tcp: TcpStack::new(config.protector, random_seed()),
                     };
                     run(poll, File::from(tun), flows, &inbox, &stats)
                 }
@@ -142,6 +145,16 @@ impl Drop for Engine {
 struct Flows {
     resolver: Resolver,
     nat: UdpNat,
+    tcp: TcpStack,
+}
+
+fn random_seed() -> u64 {
+    let mut seed = [0u8; 8];
+    // Graine non cryptographique (numéros de port et de séquence de smoltcp) : l'horloge suffit en repli.
+    if getrandom::fill(&mut seed).is_err() {
+        return Instant::now().elapsed().as_nanos() as u64 ^ 0x9e37_79b9_7f4a_7c15;
+    }
+    u64::from_le_bytes(seed)
 }
 
 fn run(
@@ -155,8 +168,12 @@ fn run(
     let mut buf = vec![0u8; READ_BUFFER];
     let mut out = Vec::with_capacity(1500);
     loop {
-        let timeout =
-            (flows.resolver.has_pending() || flows.nat.has_flows()).then_some(EXPIRY_TICK);
+        let tick = (flows.resolver.has_pending() || flows.nat.has_flows() || flows.tcp.has_flows())
+            .then_some(EXPIRY_TICK);
+        let timeout = match (tick, flows.tcp.poll_delay()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         match poll.poll(&mut events, timeout) {
             Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -193,6 +210,11 @@ fn run(
                         return Ok(());
                     }
                 }
+                Token(t) if t >= tcp_stack::TOKEN_BASE => {
+                    flows
+                        .tcp
+                        .upstream_event(t, event.is_readable(), event.is_writable());
+                }
                 Token(t) if t >= udp_nat::TOKEN_BASE => {
                     flows
                         .nat
@@ -214,6 +236,9 @@ fn run(
                 }
             }
         }
+        flows
+            .tcp
+            .run(poll.registry(), |packet| write_tun(&mut tun, packet));
     }
 }
 
@@ -316,6 +341,9 @@ fn handle(
             // se replie aussitôt sur UDP/53 ; en mode strict la résolution échoue, ce qui reste visible (alerte J4).
             if is_resolver(segment.dst.ip()) || segment.dst.port() == DOT_PORT {
                 return tcp::build_reset(&segment, out).is_some_and(|built| built.is_ok());
+            }
+            if !tcp_stack::is_tunnel_address(segment.dst.ip()) {
+                flows.tcp.ingest(registry, raw, &segment, stats);
             }
             false
         }
@@ -540,36 +568,16 @@ mod tests {
     }
 
     #[test]
-    fn drops_tcp_until_the_userspace_stack_lands() {
+    fn drops_traffic_without_verdict() {
         let (app, engine) = start("");
+        // ICMP echo : ni relayé ni répondu, jamais de faux « ping » au nom d'un hôte distant.
         let mut packet = Vec::new();
-        let tcp = [
-            0x9c,
-            0x40,
-            0x00,
-            0x50,
-            0,
-            0,
-            0,
-            1,
-            0,
-            0,
-            0,
-            0,
-            0x50,
-            tcp::SYN,
-            0xff,
-            0xff,
-            0,
-            0,
-            0,
-            0,
-        ];
+        let echo = [8, 0, 0xf7, 0xfe, 0, 1, 0, 0];
         ip::build(
             sa(CLIENT).ip(),
             "93.184.216.34".parse().unwrap(),
-            ip::PROTO_TCP,
-            &tcp,
+            ip::PROTO_ICMP,
+            &echo,
             &mut packet,
         )
         .unwrap();
@@ -728,6 +736,188 @@ mod tests {
         assert!(
             remote.recv_from(&mut buf).is_err(),
             "aucun octet ne doit sortir sans protect()"
+        );
+        engine.stop().unwrap();
+    }
+
+    fn tcp_packet(
+        src: SocketAddr,
+        dst: SocketAddr,
+        seq: u32,
+        ack: u32,
+        flags: u8,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        let header = tcp::Header {
+            src,
+            dst,
+            seq,
+            ack,
+            flags,
+            window: 65_535,
+        };
+        tcp::build(&header, payload, &mut out).unwrap();
+        out
+    }
+
+    /// Prochain segment TCP renvoyé à l'app, avec sa charge utile.
+    fn next_segment(app: &UnixDatagram) -> (tcp::Segment, Vec<u8>) {
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = app.recv(&mut buf).unwrap();
+            let packet = ip::parse(&buf[..n]).unwrap();
+            if packet.protocol != ip::PROTO_TCP {
+                continue;
+            }
+            let segment = tcp::parse(&packet).unwrap();
+            let offset = usize::from(packet.payload[12] >> 4) * 4;
+            return (segment, packet.payload[offset..].to_vec());
+        }
+    }
+
+    #[test]
+    fn relays_tcp_connection_through_userspace_stack() {
+        let (app, engine) = start("");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut request = [0u8; 3];
+            std::io::Read::read_exact(&mut conn, &mut request).unwrap();
+            std::io::Write::write_all(&mut conn, b"HELLO").unwrap();
+            request
+        });
+        let client = sa("10.111.0.1:40001");
+
+        app.send(&tcp_packet(client, remote, 1000, 0, tcp::SYN, &[]))
+            .unwrap();
+        let (syn_ack, _) = next_segment(&app);
+        assert_eq!(syn_ack.flags & (tcp::SYN | tcp::ACK), tcp::SYN | tcp::ACK);
+        assert_eq!(syn_ack.src, remote, "smoltcp répond au nom du serveur visé");
+        assert_eq!(syn_ack.ack, 1001);
+
+        let server_seq = syn_ack.seq.wrapping_add(1);
+        app.send(&tcp_packet(
+            client,
+            remote,
+            1001,
+            server_seq,
+            tcp::ACK | tcp::PSH,
+            b"GET",
+        ))
+        .unwrap();
+
+        let mut received = Vec::new();
+        let mut ack = server_seq;
+        while received.len() < 5 {
+            let (segment, payload) = next_segment(&app);
+            assert_eq!(segment.flags & tcp::RST, 0, "connexion réinitialisée");
+            if !payload.is_empty() {
+                received.extend_from_slice(&payload);
+                ack = segment.seq.wrapping_add(payload.len() as u32);
+                app.send(&tcp_packet(client, remote, 1004, ack, tcp::ACK, &[]))
+                    .unwrap();
+            }
+        }
+        assert_eq!(&received, b"HELLO");
+        assert_eq!(&server.join().unwrap(), b"GET");
+        assert_eq!(engine.stats().get(Counter::TcpFlows), 1);
+        let _ = ack;
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn streams_bulk_download_with_backpressure() {
+        const SIZE: usize = 2 * 1024 * 1024;
+        let (app, engine) = start("");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let body: Vec<u8> = (0..SIZE).map(|i| (i % 251) as u8).collect();
+            std::io::Write::write_all(&mut conn, &body).unwrap();
+        });
+        let client = sa("10.111.0.1:40010");
+        app.send(&tcp_packet(client, remote, 1, 0, tcp::SYN, &[]))
+            .unwrap();
+        let (syn_ack, _) = next_segment(&app);
+        let mut expected = syn_ack.seq.wrapping_add(1);
+        app.send(&tcp_packet(client, remote, 2, expected, tcp::ACK, &[]))
+            .unwrap();
+
+        let mut received = Vec::with_capacity(SIZE);
+        let mut fin = false;
+        while !fin {
+            let (segment, payload) = next_segment(&app);
+            assert_eq!(segment.flags & tcp::RST, 0);
+            // Client minimal : n'accepte que les segments dans l'ordre, ACK cumulatif à chaque segment.
+            if segment.seq == expected {
+                received.extend_from_slice(&payload);
+                expected = expected.wrapping_add(payload.len() as u32);
+                if segment.flags & tcp::FIN != 0 {
+                    expected = expected.wrapping_add(1);
+                    fin = true;
+                }
+            }
+            app.send(&tcp_packet(client, remote, 2, expected, tcp::ACK, &[]))
+                .unwrap();
+        }
+        server.join().unwrap();
+        assert_eq!(received.len(), SIZE);
+        assert!(
+            received
+                .iter()
+                .enumerate()
+                .all(|(i, &b)| b == (i % 251) as u8)
+        );
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn resets_app_when_server_refuses() {
+        let (app, engine) = start("");
+        let closed = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let client = sa("10.111.0.1:40002");
+        app.send(&tcp_packet(client, closed, 5000, 0, tcp::SYN, &[]))
+            .unwrap();
+        loop {
+            let (segment, _) = next_segment(&app);
+            if segment.flags & tcp::RST != 0 {
+                break;
+            }
+        }
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn refuses_tcp_when_protect_fails() {
+        let (app, engine_side) = UnixDatagram::pair().unwrap();
+        engine_side.set_nonblocking(true).unwrap();
+        app.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let engine = Engine::start(OwnedFd::from(engine_side), config("", false)).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let client = sa("10.111.0.1:40003");
+        app.send(&tcp_packet(
+            client,
+            listener.local_addr().unwrap(),
+            1,
+            0,
+            tcp::SYN,
+            &[],
+        ))
+        .unwrap();
+
+        let (segment, _) = next_segment(&app);
+        assert_ne!(segment.flags & tcp::RST, 0);
+        assert_eq!(engine.stats().get(Counter::TcpFailures), 1);
+        assert!(
+            listener.accept().is_err(),
+            "aucune connexion amont sans protect()"
         );
         engine.stop().unwrap();
     }

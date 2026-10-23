@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). Milestones J0 (build chain) and J1 (DNS-only VPN) are in place. All milestones are listed in `docs/preconisation-initialisation.md` §5, and its "Avancement" section tracks what each delivered and deferred.
+aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). Milestones J0 (build chain), J1 (DNS filtering) and J2 (full tunnel) are in place. All milestones are listed in `docs/preconisation-initialisation.md` §5, and its "Avancement" section tracks what each delivered and deferred.
 
 - `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French) is the source of truth. Part I corrects earlier assumptions; Part II is the implementation spec. Update it when a design decision changes.
 - `docs/preconisation-initialisation.md` refines it for the bootstrap. Deviations still to approve: the Rust `FlowTable` as the single flow cache, and a fixed binary rule envelope with an FST payload instead of protobuf.
@@ -17,29 +17,37 @@ Layout:
   - The onboarding step is derived from system state by `OnboardingFlow` (VPN consent, notification permission, `LockdownStatus`); nothing is persisted except a `noBackupFilesDir/onboarding_done` marker.
   - The home state comes from `HomeState.of(ShieldStatus.Snapshot)`.
 - `vpn/`:
-  - `ShieldVpnService`: FGS `systemExempted`. It routes **only** the resolver IPs (`10.111.0.53/32`, `fd00:6d73::53/128`) in J1; full tunnel arrives in J2.
+  - `ShieldVpnService`: FGS `systemExempted`. It routes everything (`0.0.0.0/0` and `::/0`). There is no LAN exclusion yet, because the R1 opt-in doesn't exist.
   - `UpstreamDns`: follows the best non-VPN network and hands the engine one protected, connected UDP socket per DNS server (max 4).
   - `ShieldStatus`: lock-free state and counter holder observed by the UI.
   - Also: the spec's `ShieldPolicy`, `LockdownStatus`, `FlowOwnerResolver` and `com.akeeper.security.AdvancedProtectionPolicy`.
 - `engine/`: `NativeEngine` (JNI). The `cargoNdk<Variant>` task builds `rust/` and feeds the `.so` to the variant's `jniLibs`.
-- `rust/`: workspace `akeeper-proto` (pure bounded parsers and builders: IP, UDP, TCP RST, DNS), `akeeper-engine` (mio loop, FST `Blocklist`, DNS `Resolver`), `akeeper-ffi` (the only crate allowed `unsafe`). `rust/fuzz/` is a separate nightly-only workspace with targets `packet`, `dns` and `transport`.
+- `rust/`:
+  - `akeeper-proto`: pure bounded parsers and builders for IP, UDP, TCP, ICMP port-unreachable and DNS.
+  - `akeeper-engine`: mio loop, FST `Blocklist`, DNS `Resolver`, `UdpNat`, and `TcpStack` (smoltcp with `any_ip`, terminating app connections and relaying them over protected sockets; no MITM).
+  - `akeeper-ffi`: the only crate allowed `unsafe`. `rust/fuzz/` is a separate nightly-only workspace with targets `packet`, `dns` and `transport`.
 - `build-logic/`: convention plugins `akeeper.android-library` / `akeeper.android-application` (compileSdk/minSdk 36, Java 21, JUnit 5, pinned NDK) and the `CargoNdkBuild` task.
 
-Engine behaviour (J1) for traffic addressed to the resolver IPs:
-- **UDP/53**:
+Engine verdicts (spec §6). Anything not listed is dropped (ICMP echo included):
+- **UDP/53 to any IP**: answered by the local resolver, from that IP (DNAT).
   - NXDOMAIN for blocklisted names (subdomains included) and for `use-application-dns.net`;
   - NODATA for type 65 (HTTPS/SVCB);
   - SERVFAIL when there is no upstream;
   - everything else is forwarded with a random ID, and only answers whose ID **and** question match are relayed.
-- **TCP**: RST, so Private DNS in "automatic" mode falls back to UDP/53 at once.
-- **Everything else** is dropped.
+- **UDP/443 and UDP/853**: ICMP port unreachable, so QUIC and DoQ fall back to TCP.
+- **Other UDP**: relayed by `UdpNat` over one protected, connected socket per (client, destination), with a 60 s idle timeout and a 1024-flow cap.
+- **TCP to the resolver IPs and TCP/853 to any IP**: RST.
+- **Other TCP**: terminated by `TcpStack` and relayed over a protected socket. Caps: 512 flows, 64 KiB buffers. The upstream connect starts on the SYN; if it fails, the app gets a RST.
+- **Never send through an unprotected socket**: if `protect()` returns false, the flow is refused (counted as `UdpNatFailures` / `TcpFailures`).
+- **IPv4 fragments are dropped.**
 
 The blocklist is `filesDir/blocklist.txt`, one domain per line, read once at start; there is no UI or default list yet.
 
-JNI contract (scalars only, no Java objects cross):
-- `nativeStart(tunFd, blocklistFd)`, `nativeSetUpstream(handle, slot, fd)`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given.
+JNI contract:
+- `nativeStart(tunFd, blocklistFd, host)`, `nativeSetUpstream(handle, slot, fd)`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given.
+- `host` is the only Java object to cross. It is a `NativeEngine.Host` held as a global ref; `protect(int)` is called from the engine thread, which stays attached to the JVM. The R8 keep rule is in `engine/consumer-rules.pro`.
 - `NativeEngine` methods are `synchronized` so a call can't race `nativeStop` into a use-after-free.
-- Keep `NativeEngine.Counter` and `akeeper_engine::Counter` in the same order, and `NativeEngine.MAX_UPSTREAMS` equal to `akeeper_engine::MAX_UPSTREAMS`.
+- Keep `NativeEngine.Counter` and `akeeper_engine::Counter` in the same order (13 counters), and `NativeEngine.MAX_UPSTREAMS` equal to `akeeper_engine::MAX_UPSTREAMS`.
 
 License: GPL-3.0.
 

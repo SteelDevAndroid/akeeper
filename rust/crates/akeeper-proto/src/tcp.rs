@@ -8,6 +8,7 @@ const MIN_HEADER: usize = 20;
 pub const FIN: u8 = 0x01;
 pub const SYN: u8 = 0x02;
 pub const RST: u8 = 0x04;
+pub const PSH: u8 = 0x08;
 pub const ACK: u8 = 0x10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,19 +81,49 @@ pub fn build_reset(incoming: &Segment, out: &mut Vec<u8>) -> Option<Result<(), B
             .wrapping_add(consumed);
         (0, ack, RST | ACK)
     };
-    let (src, dst) = (incoming.dst, incoming.src);
-    let mut segment = Vec::with_capacity(MIN_HEADER);
-    segment.extend_from_slice(&src.port().to_be_bytes());
-    segment.extend_from_slice(&dst.port().to_be_bytes());
-    segment.extend_from_slice(&seq.to_be_bytes());
-    segment.extend_from_slice(&ack.to_be_bytes());
-    segment.extend_from_slice(&[(MIN_HEADER as u8 / 4) << 4, flags, 0, 0, 0, 0, 0, 0]);
-    let acc = checksum::pseudo_header(src.ip(), dst.ip(), PROTO_TCP, MIN_HEADER as u32);
+    Some(build(
+        &Header {
+            src: incoming.dst,
+            dst: incoming.src,
+            seq,
+            ack,
+            flags,
+            window: 0,
+        },
+        &[],
+        out,
+    ))
+}
+
+/// Champs d'un segment TCP sans option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Header {
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub seq: u32,
+    pub ack: u32,
+    pub flags: u8,
+    pub window: u16,
+}
+
+/// Écrit un paquet IP + TCP complet, somme de contrôle comprise ; `out` est vidé au préalable.
+pub fn build(header: &Header, payload: &[u8], out: &mut Vec<u8>) -> Result<(), BuildError> {
+    let len = u32::try_from(MIN_HEADER + payload.len()).map_err(|_| BuildError::TooLarge)?;
+    let mut segment = Vec::with_capacity(MIN_HEADER + payload.len());
+    segment.extend_from_slice(&header.src.port().to_be_bytes());
+    segment.extend_from_slice(&header.dst.port().to_be_bytes());
+    segment.extend_from_slice(&header.seq.to_be_bytes());
+    segment.extend_from_slice(&header.ack.to_be_bytes());
+    segment.extend_from_slice(&[(MIN_HEADER as u8 / 4) << 4, header.flags]);
+    segment.extend_from_slice(&header.window.to_be_bytes());
+    segment.extend_from_slice(&[0, 0, 0, 0]);
+    segment.extend_from_slice(payload);
+    let acc = checksum::pseudo_header(header.src.ip(), header.dst.ip(), PROTO_TCP, len);
     let sum = checksum::finish(checksum::add(acc, &segment));
     if let Some(slot) = segment.get_mut(16..18) {
         slot.copy_from_slice(&sum.to_be_bytes());
     }
-    Some(ip::build(src.ip(), dst.ip(), PROTO_TCP, &segment, out))
+    ip::build(header.src.ip(), header.dst.ip(), PROTO_TCP, &segment, out)
 }
 
 #[cfg(test)]

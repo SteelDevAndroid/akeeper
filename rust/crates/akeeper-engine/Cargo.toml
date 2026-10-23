@@ -11,6 +11,9 @@ akeeper-proto.workspace = true
 mio.workspace = true
 fst.workspace = true
 getrandom.workspace = true
+smoltcp.workspace = true
+socket2.workspace = true
+libc.workspace = true
 
 [lints]
 workspace = true

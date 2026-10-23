@@ -58,13 +58,14 @@ public final class ShieldVpnService extends VpnService {
                 .setMtu(1500)
                 .addAddress("10.111.0.1", 32)
                 .addAddress("fd00:6d73::1", 128)
-                // J1 : seul le résolveur local passe par le tunnel ; J2 routera 0.0.0.0/0 et ::/0.
-                .addRoute(DNS_V4, 32)
-                .addRoute(DNS_V6, 128)
+                // Tunnel complet : ::/0 explicite, sinon l'IPv6 (464XLAT, réseaux v6 seuls) sortirait en clair.
+                .addRoute("0.0.0.0", 0)
+                .addRoute("::", 0)
                 .addDnsServer(DNS_V4)
                 .addDnsServer(DNS_V6)
                 .setBlocking(false)
                 .setMetered(false);
+        // Aucune exclusion LAN : l'option opt-in (R1) n'existe pas encore, le LAN passe donc par le filtre.
 
         var tun = builder.establish();
         if (tun == null) {

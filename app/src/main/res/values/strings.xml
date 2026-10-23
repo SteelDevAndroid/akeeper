@@ -35,7 +35,7 @@
     <string name="home_level_warn">Protection partielle</string>
     <string name="home_level_danger">Non protégé</string>
     <string name="home_protected_title">Protégé</string>
-    <string name="home_protected_sub">Verrouillage actif. Les requêtes DNS de vos apps sont filtrées.</string>
+    <string name="home_protected_sub">Verrouillage actif. Le trafic de vos apps passe par le filtre.</string>
     <string name="home_no_lockdown_title">Protégé, mais sans verrouillage</string>
     <string name="home_no_lockdown_sub">Si aKeeper s\'arrête, le trafic passera sans filtrage.</string>
     <string name="home_no_lockdown_action">Activer le verrouillage</string>
