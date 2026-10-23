@@ -28,6 +28,7 @@ public final class ShieldVpnService extends VpnService {
     private NativeEngine engine;
     private UpstreamDns upstream;
     private ShieldStatus.Subscription appRules;
+    private boolean privateDnsStrict;
 
     /** Prérequis : {@link VpnService#prepare} a renvoyé {@code null} (consentement accordé). */
     public static void start(Context context) {
@@ -50,7 +51,8 @@ public final class ShieldVpnService extends VpnService {
             stopSelf();
             return START_NOT_STICKY;
         }
-        ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled())));
+        ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled()),
+                privateDnsStrict));
         return START_STICKY;
     }
 
@@ -83,7 +85,7 @@ public final class ShieldVpnService extends VpnService {
         ShieldStatus.attach(engine);
         applyAppRules();
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
-                this::followUnderlying);
+                this::followUnderlying, this::onPrivateDnsStrict);
         upstream.start(new Handler(Looper.getMainLooper()));
         return true;
     }
@@ -118,6 +120,17 @@ public final class ShieldVpnService extends VpnService {
         @Override
         public int ownerUid(int protocol, byte[] localAddress, int localPort, byte[] remoteAddress, int remotePort) {
             return resolver.ownerUid(protocol, localAddress, localPort, remoteAddress, remotePort);
+        }
+    }
+
+    private void onPrivateDnsStrict(boolean strict) {
+        if (strict == privateDnsStrict) {
+            return;
+        }
+        privateDnsStrict = strict;
+        ShieldStatus.publish(ShieldStatus.current().withPrivateDnsStrict(strict));
+        if (strict) {
+            ShieldNotifications.alertPrivateDnsStrict(this);
         }
     }
 

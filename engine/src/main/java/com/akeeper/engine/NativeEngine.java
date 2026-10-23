@@ -20,7 +20,7 @@ public final class NativeEngine implements AutoCloseable {
     /** Indices partagés avec {@code akeeper_engine::Counter} : l'ordre fait partie du contrat JNI. */
     public enum Counter {
         PACKETS, BYTES, MALFORMED, TCP, UDP, ICMP, DNS_QUERIES, DNS_BLOCKED, DNS_UPSTREAM_FAILURES,
-        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES, APP_BLOCKED
+        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES, APP_BLOCKED, SNI_BLOCKED, DOT_BLOCKED
     }
 
     /** Rappelé par le thread natif, une fois par socket ou par nouveau flux : doit rester rapide. */

@@ -292,6 +292,10 @@ public final class MainActivity extends AppCompatActivity {
                 title.setText(R.string.home_no_lockdown_title);
                 sub.setText(R.string.home_no_lockdown_sub);
             }
+            case PRIVATE_DNS_STRICT -> {
+                title.setText(R.string.home_dns_strict_title);
+                sub.setText(R.string.home_dns_strict_sub);
+            }
             case REVOKED -> {
                 title.setText(R.string.home_revoked_title);
                 sub.setText(R.string.home_revoked_sub);
@@ -307,6 +311,12 @@ public final class MainActivity extends AppCompatActivity {
                 action.setVisibility(View.VISIBLE);
                 action.setText(R.string.home_no_lockdown_action);
                 action.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)));
+            }
+            case OPEN_NETWORK_SETTINGS -> {
+                action.setVisibility(View.VISIBLE);
+                action.setText(R.string.home_dns_strict_action);
+                // Aucun intent public stable vers le réglage DNS privé : les réglages réseau en sont le plus proche.
+                action.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS)));
             }
             case REACTIVATE -> {
                 action.setVisibility(View.VISIBLE);

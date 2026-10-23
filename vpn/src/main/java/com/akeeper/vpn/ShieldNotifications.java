@@ -12,6 +12,7 @@ final class ShieldNotifications {
 
     static final int STATUS_ID = 1;
     private static final int ALERT_ID = 2;
+    private static final int PRIVATE_DNS_ALERT_ID = 3;
     private static final String CHANNEL_STATUS = "status";
     private static final String CHANNEL_ALERTS = "alerts";
 
@@ -38,6 +39,18 @@ final class ShieldNotifications {
                 .setOngoing(true)
                 .setContentIntent(openApp(context))
                 .build();
+    }
+
+    static void alertPrivateDnsStrict(Context context) {
+        var notification = new Notification.Builder(context, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_shield)
+                .setContentTitle(context.getString(R.string.alert_private_dns_title))
+                .setContentText(context.getString(R.string.alert_private_dns_text))
+                .setCategory(Notification.CATEGORY_ERROR)
+                .setAutoCancel(true)
+                .setContentIntent(openApp(context))
+                .build();
+        context.getSystemService(NotificationManager.class).notify(PRIVATE_DNS_ALERT_ID, notification);
     }
 
     static void alertRevoked(Context context) {

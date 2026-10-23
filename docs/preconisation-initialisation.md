@@ -54,6 +54,16 @@ Pas encore livrés :
 - le détail d'app A3, le filtre « Récentes » et les volumes par app, faute de compteurs par UID ;
 - le recalcul des UID à l'installation d'une app pendant que le service tourne. Les UID sont recalculés au démarrage du service et à chaque modification des règles.
 
+**J4 livré (anti-évasion complète)** :
+- **SNI TLS** : extrait du ClientHello (`akeeper-proto::tls`, fuzzé). Une connexion vers un nom bloqué, liste de blocage ou point d'accès DoH connu, est coupée avant le moindre octet envoyé au serveur.
+- **Points d'accès DoH** : la résolution DNS de leurs noms est aussi refusée.
+- **DNS privé strict** : détecté via `LinkProperties`. Il déclenche l'état ambre de l'accueil et une notification d'alerte.
+
+Écarts :
+- La liste DoH est embarquée et provisoire. La spec prévoit une liste IP et SNI signée, qui arrive avec les bundles J5, et le blocage par IP n'est pas encore fait.
+- Un ClientHello réparti sur plusieurs enregistrements TLS n'est pas inspecté. Une app pourrait s'en servir pour contourner le filtrage SNI, mais pas le filtrage DNS.
+- Pas de SNI QUIC : UDP/443 est déjà refusé, conformément à l'écart n°5.
+
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 
 ## 1. Décisions structurantes

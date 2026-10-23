@@ -34,16 +34,18 @@ final class UpstreamDns extends ConnectivityManager.NetworkCallback implements A
     private final NativeEngine engine;
     private final Protector protector;
     private final Consumer<Network> onUnderlyingNetwork;
+    private final Consumer<Boolean> onPrivateDnsStrict;
 
     private Network appliedNetwork;
     private List<InetAddress> appliedServers = List.of();
 
     UpstreamDns(ConnectivityManager connectivity, NativeEngine engine, Protector protector,
-                Consumer<Network> onUnderlyingNetwork) {
+                Consumer<Network> onUnderlyingNetwork, Consumer<Boolean> onPrivateDnsStrict) {
         this.connectivity = connectivity;
         this.engine = engine;
         this.protector = protector;
         this.onUnderlyingNetwork = onUnderlyingNetwork;
+        this.onPrivateDnsStrict = onPrivateDnsStrict;
     }
 
     void start(Handler handler) {
@@ -56,6 +58,9 @@ final class UpstreamDns extends ConnectivityManager.NetworkCallback implements A
 
     @Override
     public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+        // Un nom de serveur n'est présent qu'en mode strict : le système chiffre alors le DNS vers ce serveur
+        // et ne passe plus par le résolveur local (spec §6, « DNS opaque »).
+        onPrivateDnsStrict.accept(properties.getPrivateDnsServerName() != null);
         apply(network, select(properties.getDnsServers()));
     }
 

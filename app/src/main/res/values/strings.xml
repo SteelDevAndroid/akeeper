@@ -39,6 +39,9 @@
     <string name="home_no_lockdown_title">Protégé, mais sans verrouillage</string>
     <string name="home_no_lockdown_sub">Si aKeeper s\'arrête, le trafic passera sans filtrage.</string>
     <string name="home_no_lockdown_action">Activer le verrouillage</string>
+    <string name="home_dns_strict_title">Le DNS privé empêche le filtrage des sites</string>
+    <string name="home_dns_strict_sub">Réglez le DNS privé sur « Automatique » (Réseau et Internet › DNS privé) pour rétablir le filtrage.</string>
+    <string name="home_dns_strict_action">Ouvrir les réglages réseau</string>
     <string name="home_revoked_title">Protection désactivée par une autre app VPN</string>
     <string name="home_revoked_sub">Le trafic de vos apps n\'est plus filtré.</string>
     <string name="home_stopped_title">Protection arrêtée</string>

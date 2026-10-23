@@ -6,7 +6,10 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 use std::os::fd::AsRawFd;
 
+use std::sync::Arc;
+
 use akeeper_proto::tcp::{self, Segment};
+use akeeper_proto::tls::{self, Sni, TlsError};
 use mio::net::TcpStream;
 use mio::{Interest, Registry, Token};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
@@ -17,6 +20,7 @@ use smoltcp::wire::{HardwareAddress, IpCidr, IpListenEndpoint};
 use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::SharedHost;
+use crate::filter::Filter;
 use crate::stats::{Counter, Stats};
 
 /// Jetons mio des sockets amont TCP ; ceux de l'UDP NAT restent en dessous.
@@ -75,6 +79,8 @@ impl Device for Queue {
 
 struct Flow {
     handle: SocketHandle,
+    /// Verdict SNI rendu : tant que faux, aucun octet de l'app ne part vers le serveur.
+    inspected: bool,
     uid: Option<u32>,
     upstream: TcpStream,
     client: SocketAddr,
@@ -91,6 +97,7 @@ struct Flow {
 
 pub(crate) struct TcpStack {
     host: SharedHost,
+    filter: Arc<Filter>,
     iface: Interface,
     device: Queue,
     sockets: SocketSet<'static>,
@@ -101,7 +108,7 @@ pub(crate) struct TcpStack {
 }
 
 impl TcpStack {
-    pub(crate) fn new(host: SharedHost, seed: u64) -> Self {
+    pub(crate) fn new(host: SharedHost, seed: u64, filter: Arc<Filter>) -> Self {
         let mut device = Queue::default();
         let mut config = Config::new(HardwareAddress::Ip);
         config.random_seed = seed;
@@ -118,6 +125,7 @@ impl TcpStack {
         });
         Self {
             host,
+            filter,
             iface,
             device,
             sockets: SocketSet::new(Vec::new()),
@@ -225,6 +233,7 @@ impl TcpStack {
             token,
             Flow {
                 handle,
+                inspected: false,
                 uid,
                 upstream,
                 client,
@@ -259,7 +268,7 @@ impl TcpStack {
     }
 
     /// Fait avancer smoltcp et tous les flux ; les paquets à écrire dans le TUN sont passés à `emit`.
-    pub(crate) fn run(&mut self, registry: &Registry, mut emit: impl FnMut(&[u8])) {
+    pub(crate) fn run(&mut self, registry: &Registry, stats: &Stats, mut emit: impl FnMut(&[u8])) {
         let now = SmolInstant::now();
         self.iface.poll(now, &mut self.device, &mut self.sockets);
         for flow in self.flows.values_mut() {
@@ -267,6 +276,8 @@ impl TcpStack {
                 flow,
                 self.sockets.get_mut::<smol::Socket>(flow.handle),
                 &mut self.scratch,
+                &self.filter,
+                stats,
             );
         }
         self.iface.poll(now, &mut self.device, &mut self.sockets);
@@ -298,7 +309,13 @@ impl TcpStack {
 }
 
 /// Avance un flux d'un pas dans les deux sens, sans jamais bloquer.
-fn pump(flow: &mut Flow, socket: &mut smol::Socket<'static>, scratch: &mut [u8]) {
+fn pump(
+    flow: &mut Flow,
+    socket: &mut smol::Socket<'static>,
+    scratch: &mut [u8],
+    filter: &Filter,
+    stats: &Stats,
+) {
     if flow.failed {
         socket.abort();
         return;
@@ -328,27 +345,33 @@ fn pump(flow: &mut Flow, socket: &mut smol::Socket<'static>, scratch: &mut [u8])
         return;
     }
 
-    // App → serveur.
-    refill_from_app(flow, socket, scratch);
-    while flow.writable && !flow.to_upstream.is_empty() {
-        match flow.upstream.write(&flow.to_upstream) {
-            Ok(n) => {
-                flow.to_upstream.drain(..n);
-                refill_from_app(flow, socket, scratch);
-            }
-            Err(e) if e.kind() == ErrorKind::WouldBlock => flow.writable = false,
-            Err(e) if e.kind() == ErrorKind::Interrupted => {}
-            Err(_) => {
-                flow.failed = true;
-                socket.abort();
-                return;
+    // App → serveur, seulement une fois le SNI jugé ; l'autre sens continue (protocoles où le serveur parle d'abord).
+    let may_forward = flow.inspected || inspect(flow, socket, scratch, filter, stats);
+    if flow.failed {
+        return;
+    }
+    if may_forward {
+        refill_from_app(flow, socket, scratch);
+        while flow.writable && !flow.to_upstream.is_empty() {
+            match flow.upstream.write(&flow.to_upstream) {
+                Ok(n) => {
+                    flow.to_upstream.drain(..n);
+                    refill_from_app(flow, socket, scratch);
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => flow.writable = false,
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(_) => {
+                    flow.failed = true;
+                    socket.abort();
+                    return;
+                }
             }
         }
-    }
-    if !socket.may_recv() && flow.to_upstream.is_empty() && !flow.upstream_shut {
-        // L'app a fermé son sens d'émission (FIN) : on le propage au serveur.
-        let _ = flow.upstream.shutdown(Shutdown::Write);
-        flow.upstream_shut = true;
+        if !socket.may_recv() && flow.to_upstream.is_empty() && !flow.upstream_shut {
+            // L'app a fermé son sens d'émission (FIN) : on le propage au serveur.
+            let _ = flow.upstream.shutdown(Shutdown::Write);
+            flow.upstream_shut = true;
+        }
     }
 
     // Serveur → app.
@@ -384,6 +407,48 @@ fn pump(flow: &mut Flow, socket: &mut smol::Socket<'static>, scratch: &mut [u8])
     }
     if flow.upstream_eof && flow.to_client.is_empty() && socket.may_send() {
         socket.close();
+    }
+}
+
+/// Accumule le début du flux de l'app jusqu'à pouvoir lire le SNI d'un ClientHello. Renvoie `true` une fois
+/// le flux autorisé ; un nom bloqué (liste ou DoH connu) coupe la connexion avant tout octet envoyé au serveur.
+/// Un ClientHello illisible ou réparti sur plusieurs enregistrements TLS passe : le serveur le rejettera s'il
+/// est forgé, et le filtrage DNS reste en amont.
+fn inspect(
+    flow: &mut Flow,
+    socket: &mut smol::Socket<'static>,
+    scratch: &mut [u8],
+    filter: &Filter,
+    stats: &Stats,
+) -> bool {
+    while socket.can_recv() && flow.to_upstream.len() < tls::MAX_RECORD {
+        let room = (tls::MAX_RECORD - flow.to_upstream.len()).min(scratch.len());
+        let Some(window) = scratch.get_mut(..room) else {
+            break;
+        };
+        match socket.recv_slice(window) {
+            Ok(n) if n > 0 => flow
+                .to_upstream
+                .extend_from_slice(window.get(..n).unwrap_or_default()),
+            _ => break,
+        }
+    }
+    match tls::client_hello_sni(&flow.to_upstream) {
+        Ok(Sni::Host(host)) if filter.blocks(&host) => {
+            stats.add(Counter::SniBlocked, 1);
+            flow.failed = true;
+            socket.abort();
+            false
+        }
+        Err(TlsError::Incomplete)
+            if flow.to_upstream.len() < tls::MAX_RECORD && socket.may_recv() =>
+        {
+            false
+        }
+        _ => {
+            flow.inspected = true;
+            true
+        }
     }
 }
 

@@ -34,3 +34,10 @@ path = "fuzz_targets/transport.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "tls"
+path = "fuzz_targets/tls.rs"
+test = false
+doc = false
+bench = false
