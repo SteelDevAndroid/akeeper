@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use akeeper_proto::dns::{self, Query, Rcode};
 use akeeper_proto::udp::Datagram;
 
-use crate::Blocklist;
+use std::sync::Arc;
+
+use crate::filter::Filter;
 use crate::stats::{Counter, Stats};
 
 pub const MAX_UPSTREAMS: usize = 4;
@@ -31,20 +33,24 @@ struct Pending {
 }
 
 pub struct Resolver {
-    blocklist: Blocklist,
+    filter: Arc<Filter>,
     upstreams: [Option<UdpSocket>; MAX_UPSTREAMS],
     next_upstream: usize,
     pending: HashMap<u16, Pending>,
 }
 
 impl Resolver {
-    pub fn new(blocklist: Blocklist) -> Self {
+    pub(crate) fn new(filter: Arc<Filter>) -> Self {
         Self {
-            blocklist,
+            filter,
             upstreams: Default::default(),
             next_upstream: 0,
             pending: HashMap::new(),
         }
+    }
+
+    pub(crate) fn set_filter(&mut self, filter: Arc<Filter>) {
+        self.filter = filter;
     }
 
     pub fn upstream(&self, slot: usize) -> Option<&UdpSocket> {
@@ -87,7 +93,7 @@ impl Resolver {
         if query.qtype == dns::TYPE_HTTPS {
             return Outcome::Reply(negative(&query, Rcode::NoError));
         }
-        if query.name == DOH_CANARY || self.blocklist.blocks(&query.name) {
+        if query.name == DOH_CANARY || self.filter.blocks(&query.name) {
             stats.add(Counter::DnsBlocked, 1);
             return Outcome::Reply(negative(&query, Rcode::NxDomain));
         }

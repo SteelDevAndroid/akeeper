@@ -11,6 +11,8 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 
 import com.akeeper.engine.NativeEngine;
+import com.akeeper.rules.RuleStore;
+import com.akeeper.rules.RuleUpdates;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -28,6 +30,8 @@ public final class ShieldVpnService extends VpnService {
     private NativeEngine engine;
     private UpstreamDns upstream;
     private ShieldStatus.Subscription appRules;
+    private RuleStore.Subscription ruleUpdates;
+    private boolean privateDnsStrict;
 
     /** Prérequis : {@link VpnService#prepare} a renvoyé {@code null} (consentement accordé). */
     public static void start(Context context) {
@@ -50,7 +54,8 @@ public final class ShieldVpnService extends VpnService {
             stopSelf();
             return START_NOT_STICKY;
         }
-        ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled())));
+        ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled()),
+                privateDnsStrict));
         return START_STICKY;
     }
 
@@ -74,16 +79,22 @@ public final class ShieldVpnService extends VpnService {
         if (tun == null) {
             return false;
         }
+        var rules = RuleStore.get(this);
         try {
-            engine = NativeEngine.start(tun.detachFd(), openBlocklist(),
+            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), openBundle(rules),
                     new EngineHost(new FlowOwnerResolver(getSystemService(ConnectivityManager.class))));
         } catch (IllegalStateException e) {
             return false;
         }
         ShieldStatus.attach(engine);
         applyAppRules();
+        // Moteur capturé, comme pour les règles par app : l'activation arrive sur le thread de WorkManager.
+        var current = engine;
+        ruleUpdates = rules.observe(() -> current.setRules(openBlocklist(), openBundle(rules)));
+        // Planifiée ici et non dans l'UI : Always-on VPN démarre le service sans jamais ouvrir l'app.
+        RuleUpdates.schedule(this);
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
-                this::followUnderlying);
+                this::followUnderlying, this::onPrivateDnsStrict);
         upstream.start(new Handler(Looper.getMainLooper()));
         return true;
     }
@@ -121,6 +132,17 @@ public final class ShieldVpnService extends VpnService {
         }
     }
 
+    private void onPrivateDnsStrict(boolean strict) {
+        if (strict == privateDnsStrict) {
+            return;
+        }
+        privateDnsStrict = strict;
+        ShieldStatus.publish(ShieldStatus.current().withPrivateDnsStrict(strict));
+        if (strict) {
+            ShieldNotifications.alertPrivateDnsStrict(this);
+        }
+    }
+
     private void followUnderlying(Network network) {
         // null : le système suit le réseau par défaut ; sinon le VPN hérite de l'état (débit, facturation) du réseau suivi.
         setUnderlyingNetworks(network == null ? null : new Network[]{network});
@@ -133,6 +155,18 @@ public final class ShieldVpnService extends VpnService {
         } catch (FileNotFoundException absent) {
             return -1;
         }
+    }
+
+    /** Bundle vérifié, cédé au moteur ; -1 sans bundle valide (liste personnelle et repli DoH embarqué seuls). */
+    private static int openBundle(RuleStore rules) {
+        return rules.openActive().map(active -> {
+            try (active) {
+                // dup() partage la position du flux, laissée au début du fichier par openActive().
+                return ParcelFileDescriptor.dup(active.stream().getFD()).detachFd();
+            } catch (IOException e) {
+                return -1;
+            }
+        }).orElse(-1);
     }
 
     @Override
@@ -155,6 +189,10 @@ public final class ShieldVpnService extends VpnService {
     }
 
     private void shutdown() {
+        if (ruleUpdates != null) {
+            ruleUpdates.close();
+            ruleUpdates = null;
+        }
         if (appRules != null) {
             appRules.close();
             appRules = null;

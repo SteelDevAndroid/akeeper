@@ -24,6 +24,19 @@ impl Blocklist {
         Self(Set::from_iter(keys).unwrap_or_default())
     }
 
+    /// FST déjà construit (bundle signé) : sa somme de contrôle est vérifiée, car une recherche dans un FST
+    /// corrompu peut paniquer.
+    pub fn from_fst(bytes: Vec<u8>) -> Result<Self, fst::Error> {
+        let set = Set::new(bytes)?;
+        set.as_fst().verify()?;
+        Ok(Self(set))
+    }
+
+    /// Octets du FST, tels que `from_fst` les relit.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_fst().as_bytes()
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -61,6 +74,7 @@ fn is_valid_domain(d: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
 
@@ -76,6 +90,18 @@ mod tests {
         assert!(!list.blocks("example.net"));
         assert!(!list.blocks("notads.example.net"));
         assert!(!list.blocks(""));
+    }
+
+    #[test]
+    fn round_trips_through_fst_bytes() {
+        let list = Blocklist::from_domains("ads.example.net");
+        let copy = Blocklist::from_fst(list.as_bytes().to_vec()).unwrap();
+        assert!(copy.blocks("cdn.ads.example.net"));
+        let mut corrupted = list.as_bytes().to_vec();
+        let middle = corrupted.len() / 2;
+        corrupted[middle] ^= 0xff;
+        assert!(Blocklist::from_fst(corrupted).is_err());
+        assert!(Blocklist::from_fst(b"not an fst".to_vec()).is_err());
     }
 
     #[test]

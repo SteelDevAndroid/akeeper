@@ -7,11 +7,12 @@ enum HomeState {
     REVOKED(Level.DANGER, Action.REACTIVATE),
     STOPPED(Level.DANGER, Action.REACTIVATE),
     NO_LOCKDOWN(Level.WARN, Action.ENABLE_LOCKDOWN),
+    PRIVATE_DNS_STRICT(Level.WARN, Action.OPEN_NETWORK_SETTINGS),
     PROTECTED(Level.OK, Action.NONE);
 
     enum Level { OK, WARN, DANGER }
 
-    enum Action { NONE, REACTIVATE, ENABLE_LOCKDOWN }
+    enum Action { NONE, REACTIVATE, ENABLE_LOCKDOWN, OPEN_NETWORK_SETTINGS }
 
     final Level level;
     final Action action;
@@ -28,6 +29,9 @@ enum HomeState {
         if (!snapshot.running()) {
             return STOPPED;
         }
-        return snapshot.lockdown().failClosed() ? PROTECTED : NO_LOCKDOWN;
+        if (!snapshot.lockdown().failClosed()) {
+            return NO_LOCKDOWN;
+        }
+        return snapshot.privateDnsStrict() ? PRIVATE_DNS_STRICT : PROTECTED;
     }
 }

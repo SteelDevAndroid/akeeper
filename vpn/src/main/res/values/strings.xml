@@ -9,4 +9,6 @@
     <string name="status_dns_filtering">Filtrage DNS actif</string>
     <string name="alert_revoked_title">Protection désactivée par une autre app VPN</string>
     <string name="alert_revoked_text">Touchez pour réactiver.</string>
+    <string name="alert_private_dns_title">Le DNS privé empêche le filtrage des sites</string>
+    <string name="alert_private_dns_text">Touchez pour voir comment le corriger.</string>
 </resources>

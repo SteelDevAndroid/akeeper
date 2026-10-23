@@ -4,6 +4,7 @@ ndk = "30.0.16248370"
 material = "1.14.0"
 recyclerview = "1.4.0"
 tink = "1.23.0"
+work = "2.11.2"
 junit = "5.14.4"
 mockito = "5.24.0"
 assertj = "3.27.7"
@@ -13,6 +14,7 @@ android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref
 material = { module = "com.google.android.material:material", version.ref = "material" }
 recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "recyclerview" }
 tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }
+work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }

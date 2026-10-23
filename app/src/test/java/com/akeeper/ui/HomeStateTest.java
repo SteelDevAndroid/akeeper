@@ -15,6 +15,11 @@ class HomeStateTest {
         assertThat(HomeState.of(Snapshot.STOPPED)).isEqualTo(HomeState.STOPPED);
         assertThat(HomeState.of(new Snapshot(true, new LockdownStatus(true, false)))).isEqualTo(HomeState.NO_LOCKDOWN);
         assertThat(HomeState.of(new Snapshot(true, new LockdownStatus(true, true)))).isEqualTo(HomeState.PROTECTED);
+        assertThat(HomeState.of(new Snapshot(true, new LockdownStatus(true, true), true)))
+                .isEqualTo(HomeState.PRIVATE_DNS_STRICT);
+        assertThat(HomeState.of(new Snapshot(true, new LockdownStatus(true, false), true)))
+                .as("le verrouillage manquant prime sur le DNS strict")
+                .isEqualTo(HomeState.NO_LOCKDOWN);
     }
 
     @Test

@@ -3,12 +3,15 @@
 
 mod blocklist;
 mod dns;
+mod filter;
 mod stats;
 mod tcp_stack;
 mod udp_nat;
 
+pub use akeeper_proto::bundle::MAX_BUNDLE;
 pub use blocklist::Blocklist;
 pub use dns::MAX_UPSTREAMS;
+pub use filter::{BundleRules, Filter, RulesError};
 pub use stats::{Counter, Stats};
 
 use std::collections::HashSet;
@@ -44,7 +47,7 @@ pub trait Host: Send + Sync {
 pub type SharedHost = Arc<dyn Host>;
 
 pub struct Config {
-    pub blocklist: Blocklist,
+    pub filter: Filter,
     pub host: SharedHost,
 }
 
@@ -63,6 +66,7 @@ enum Command {
     Stop,
     SetUpstream(usize, Option<UdpSocket>),
     SetBlockedUids(HashSet<u32>),
+    SetFilter(Arc<Filter>),
 }
 
 pub struct Engine {
@@ -87,10 +91,11 @@ impl Engine {
             .spawn({
                 let stats = Arc::clone(&stats);
                 move || {
+                    let filter = Arc::new(config.filter);
                     let flows = Flows {
-                        resolver: Resolver::new(config.blocklist),
+                        resolver: Resolver::new(Arc::clone(&filter)),
                         nat: UdpNat::new(Arc::clone(&config.host)),
-                        tcp: TcpStack::new(config.host, random_seed()),
+                        tcp: TcpStack::new(config.host, random_seed(), filter),
                         blocked: HashSet::new(),
                     };
                     run(poll, File::from(tun), flows, &inbox, &stats)
@@ -119,6 +124,12 @@ impl Engine {
     /// Remplace l'ensemble des apps privées d'Internet ; leurs flux ouverts sont coupés aussitôt.
     pub fn set_blocked_uids(&self, uids: impl IntoIterator<Item = u32>) -> io::Result<()> {
         self.send(Command::SetBlockedUids(uids.into_iter().collect()))
+    }
+
+    /// Remplace les règles d'un bloc. Le filtre est construit par l'appelant, hors du thread moteur ; les flux
+    /// encore en inspection SNI sont jugés avec les nouvelles règles.
+    pub fn set_filter(&self, filter: Filter) -> io::Result<()> {
+        self.send(Command::SetFilter(Arc::new(filter)))
     }
 
     pub fn stats(&self) -> &Stats {
@@ -216,6 +227,10 @@ fn run(
                                 flows.tcp.apply_policy(&uids);
                                 flows.blocked = uids;
                             }
+                            Command::SetFilter(filter) => {
+                                flows.resolver.set_filter(Arc::clone(&filter));
+                                flows.tcp.set_filter(filter);
+                            }
                         }
                     }
                 }
@@ -260,7 +275,7 @@ fn run(
         }
         flows
             .tcp
-            .run(poll.registry(), |packet| write_tun(&mut tun, packet));
+            .run(poll.registry(), stats, |packet| write_tun(&mut tun, packet));
     }
 }
 
@@ -367,6 +382,10 @@ fn handle(
             };
             // DNS/TCP ou DoT vers le résolveur, et DoT vers tout autre serveur : RST. Private DNS « automatique »
             // se replie aussitôt sur UDP/53 ; en mode strict la résolution échoue, ce qui reste visible (alerte J4).
+            if segment.dst.port() == DOT_PORT && !is_resolver(segment.dst.ip()) {
+                // DoT vers un serveur tiers : signe d'un DNS privé en mode strict (alerte côté app).
+                stats.add(Counter::DotBlocked, 1);
+            }
             if is_resolver(segment.dst.ip()) || segment.dst.port() == DOT_PORT {
                 return tcp::build_reset(&segment, out).is_some_and(|built| built.is_ok());
             }
@@ -442,7 +461,7 @@ mod tests {
 
     fn config(list: &str, protect: bool) -> Config {
         Config {
-            blocklist: Blocklist::from_domains(list),
+            filter: Filter::new(Blocklist::from_domains(list), None),
             host: Arc::new(TestHost {
                 protect,
                 uid: Some(APP_UID),
@@ -726,6 +745,7 @@ mod tests {
         let n = app.recv(&mut buf).unwrap();
         let segment = tcp::parse(&ip::parse(&buf[..n]).unwrap()).unwrap();
         assert_eq!(segment.flags, tcp::RST | tcp::ACK);
+        assert_eq!(engine.stats().get(Counter::DotBlocked), 1);
         engine.stop().unwrap();
     }
 
@@ -1036,6 +1056,185 @@ mod tests {
             if segment.flags & tcp::RST != 0 {
                 break;
             }
+        }
+        engine.stop().unwrap();
+    }
+
+    /// ClientHello minimal portant `host` en SNI.
+    fn client_hello(host: &str) -> Vec<u8> {
+        let mut sni = vec![0];
+        sni.extend_from_slice(&(host.len() as u16).to_be_bytes());
+        sni.extend_from_slice(host.as_bytes());
+        let mut ext = vec![0, 0];
+        ext.extend_from_slice(&((sni.len() + 2) as u16).to_be_bytes());
+        ext.extend_from_slice(&(sni.len() as u16).to_be_bytes());
+        ext.extend_from_slice(&sni);
+        let mut hello = vec![3, 3];
+        hello.extend_from_slice(&[7; 32]);
+        hello.extend_from_slice(&[0, 0, 2, 0x13, 1, 1, 0]);
+        hello.extend_from_slice(&(ext.len() as u16).to_be_bytes());
+        hello.extend_from_slice(&ext);
+        let mut handshake = vec![1];
+        handshake.extend_from_slice(&(hello.len() as u32).to_be_bytes()[1..]);
+        handshake.extend_from_slice(&hello);
+        let mut record = vec![22, 3, 1];
+        record.extend_from_slice(&(handshake.len() as u16).to_be_bytes());
+        record.extend_from_slice(&handshake);
+        record
+    }
+
+    /// Établit une connexion TCP vers un serveur local et envoie `payload` ; renvoie ce que le serveur a reçu
+    /// et si l'app a été réinitialisée.
+    fn send_through_tcp(list: &str, port: u16, payload: &[u8]) -> (Vec<u8>, bool, Engine) {
+        let (app, engine) = start(list);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            conn.set_read_timeout(Some(Duration::from_millis(500)))
+                .unwrap();
+            let mut got = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut conn, &mut got);
+            got
+        });
+        let client = SocketAddr::new(sa(CLIENT).ip(), port);
+        app.send(&tcp_packet(client, remote, 1, 0, tcp::SYN, &[]))
+            .unwrap();
+        let (syn_ack, _) = next_segment(&app);
+        let server_seq = syn_ack.seq.wrapping_add(1);
+        app.send(&tcp_packet(
+            client,
+            remote,
+            2,
+            server_seq,
+            tcp::ACK | tcp::PSH,
+            payload,
+        ))
+        .unwrap();
+        let mut reset = false;
+        app.set_read_timeout(Some(Duration::from_millis(700)))
+            .unwrap();
+        let mut buf = [0u8; 2048];
+        while let Ok(n) = app.recv(&mut buf) {
+            if let Ok(packet) = ip::parse(&buf[..n])
+                && let Ok(segment) = tcp::parse(&packet)
+                && segment.flags & tcp::RST != 0
+            {
+                reset = true;
+                break;
+            }
+        }
+        (server.join().unwrap(), reset, engine)
+    }
+
+    #[test]
+    fn cuts_tls_to_blocked_sni_before_any_byte_reaches_the_server() {
+        let (received, reset, engine) = send_through_tcp(
+            "tracker.example",
+            40030,
+            &client_hello("cdn.tracker.example"),
+        );
+        assert!(reset, "l'app doit recevoir un RST");
+        assert!(
+            received.is_empty(),
+            "aucun octet du ClientHello ne doit sortir"
+        );
+        assert_eq!(engine.stats().get(Counter::SniBlocked), 1);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn cuts_tls_to_known_doh_endpoint() {
+        let (received, reset, engine) = send_through_tcp("", 40031, &client_hello("dns.google"));
+        assert!(reset && received.is_empty());
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn relays_allowed_tls_and_plain_protocols_unchanged() {
+        let hello = client_hello("www.example.org");
+        let (received, reset, engine) = send_through_tcp("tracker.example", 40032, &hello);
+        assert!(!reset);
+        assert_eq!(received, hello);
+        engine.stop().unwrap();
+
+        let (received, reset, engine) =
+            send_through_tcp("tracker.example", 40033, b"GET / HTTP/1.1\r\n\r\n");
+        assert!(!reset);
+        assert_eq!(received, b"GET / HTTP/1.1\r\n\r\n");
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn answers_doh_hostname_with_nxdomain() {
+        let (app, engine) = start("");
+        app.send(&to_resolver(&dns_query(5, "dns.google", 1)))
+            .unwrap();
+        assert_eq!(rcode(&reply(&app)), 3);
+        engine.stop().unwrap();
+    }
+
+    fn start_with_bundle(bundle: &[u8]) -> (UnixDatagram, Engine) {
+        let (app, engine_side) = UnixDatagram::pair().unwrap();
+        engine_side.set_nonblocking(true).unwrap();
+        app.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut config = config("", true);
+        config.filter = Filter::new(
+            Blocklist::empty(),
+            Some(BundleRules::parse(bundle).unwrap()),
+        );
+        let engine = Engine::start(OwnedFd::from(engine_side), config).unwrap();
+        (app, engine)
+    }
+
+    #[test]
+    fn resets_https_to_signed_doh_address_without_opening_upstream() {
+        let doh = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let (app, engine) = start_with_bundle(&filter::tests::bundle_bytes("", None, &[(32, doh)]));
+        let client = sa("10.111.0.1:40010");
+        app.send(&tcp_packet(
+            client,
+            SocketAddr::new(doh, HTTPS_PORT),
+            9000,
+            0,
+            tcp::SYN,
+            &[],
+        ))
+        .unwrap();
+        let (segment, _) = next_segment(&app);
+        assert_ne!(segment.flags & tcp::RST, 0);
+        assert_eq!(engine.stats().get(Counter::IpBlocked), 1);
+        assert_eq!(engine.stats().get(Counter::TcpFlows), 0);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn applies_bundle_categories_and_replaces_rules_live() {
+        let (app, engine) = start("");
+        app.send(&to_resolver(&dns_query(6, "a.tracker.example", 1)))
+            .unwrap();
+        assert_eq!(
+            rcode(&reply(&app)),
+            2,
+            "pas encore bloqué : SERVFAIL faute d'amont"
+        );
+
+        let bundle = filter::tests::bundle_bytes("tracker.example", None, &[]);
+        engine
+            .set_filter(Filter::new(
+                Blocklist::empty(),
+                Some(BundleRules::parse(&bundle).unwrap()),
+            ))
+            .unwrap();
+        // La commande et le paquet arrivent par deux sources epoll distinctes : l'ordre n'est pas garanti.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            app.send(&to_resolver(&dns_query(7, "a.tracker.example", 1)))
+                .unwrap();
+            if rcode(&reply(&app)) == 3 {
+                break;
+            }
+            assert!(Instant::now() < deadline);
         }
         engine.stop().unwrap();
     }

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::net::{IpAddr, SocketAddr};
 use std::os::fd::RawFd;
 
-use akeeper_engine::{Blocklist, Config, Counter, Engine, Host, SharedHost};
+use akeeper_engine::{Blocklist, BundleRules, Config, Counter, Engine, Filter, Host, SharedHost};
 use jni::objects::{GlobalRef, JClass as JniClass, JIntArray, JObject, JValue};
 use jni::{JNIEnv, JavaVM};
 
@@ -20,8 +20,9 @@ type JClass = c_void;
 type JInt = i32;
 type JLong = i64;
 
-/// Prend possession de `tun_fd` et de `blocklist_fd` (détachés côté Java ; -1 = liste vide)
-/// et renvoie un handle opaque, ou 0 en cas d'échec. Les deux fd sont fermés dans tous les cas.
+/// Prend possession de `tun_fd`, `blocklist_fd` et `bundle_fd` (détachés côté Java ; -1 = absent) et renvoie un
+/// handle opaque, ou 0 en cas d'échec (liste personnelle illisible comprise ; un bundle illisible est ignoré).
+/// Les fd sont fermés dans tous les cas.
 /// `host` implémente `NativeEngine.Host` ; une référence globale est conservée jusqu'à `nativeStop`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeStart<'local>(
@@ -29,14 +30,15 @@ pub extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeStart<'local>(
     _class: JniClass<'local>,
     tun_fd: JInt,
     blocklist_fd: JInt,
+    bundle_fd: JInt,
     host: JObject<'local>,
 ) -> JLong {
     let tun = owned(tun_fd);
-    let blocklist = owned(blocklist_fd);
+    let rules = (owned(blocklist_fd), owned(bundle_fd));
     let (Some(tun), Some(host)) = (tun, JavaHost::new(&mut env, &host)) else {
         return 0;
     };
-    catch_unwind(AssertUnwindSafe(|| start(tun, blocklist, Arc::new(host)))).unwrap_or(0)
+    catch_unwind(AssertUnwindSafe(|| start(tun, rules, Arc::new(host)))).unwrap_or(0)
 }
 
 /// `NativeEngine.Host` rappelé depuis le thread moteur, attaché une fois pour toutes à la JVM.
@@ -137,37 +139,95 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeSetBloc
     }
 }
 
+/// Remplace les règles (liste personnelle et bundle signé, -1 = absent). Le filtre est construit sur le thread
+/// appelant. Renvoie 0 si accepté, -1 sinon : les règles en place restent alors actives. Les fd sont fermés.
+///
+/// # Safety
+/// `handle` vient de `nativeStart` et n'a pas encore été passé à `nativeStop` (garanti par le verrou Java).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeSetRules(
+    _env: *mut JniEnv,
+    _class: *mut JClass,
+    handle: JLong,
+    blocklist_fd: JInt,
+    bundle_fd: JInt,
+) -> JInt {
+    let rules = (owned(blocklist_fd), owned(bundle_fd));
+    // SAFETY: contrat de la fonction ; lecture seule via &Engine.
+    let Some(engine) = (unsafe { (handle as *const Engine).as_ref() }) else {
+        return -1;
+    };
+    let applied = catch_unwind(AssertUnwindSafe(|| {
+        let filter = load_filter(rules.0, rules.1)?;
+        engine.set_filter(filter)
+    }));
+    match applied {
+        Ok(Ok(())) => 0,
+        _ => -1,
+    }
+}
+
 fn owned(fd: JInt) -> Option<OwnedFd> {
     // SAFETY: Java a appelé ParcelFileDescriptor.detachFd() : un fd positif est ouvert et n'a plus d'autre propriétaire.
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn start(tun: OwnedFd, blocklist: Option<OwnedFd>, host: SharedHost) -> JLong {
+type RuleFds = (Option<OwnedFd>, Option<OwnedFd>);
+
+fn start(tun: OwnedFd, rules: RuleFds, host: SharedHost) -> JLong {
     if set_nonblocking(&tun).is_err() {
         return 0;
     }
-    let blocklist = match blocklist.map(read_blocklist).transpose() {
-        Ok(list) => list.unwrap_or_else(Blocklist::empty),
-        Err(_) => return 0,
+    let Ok(blocklist) = read_blocklist(rules.0) else {
+        return 0;
     };
-    match Engine::start(tun, Config { blocklist, host }) {
+    // Bundle signé mais illisible (défaut du pipeline) : le plancher anti-rollback empêche d'en revenir, donc
+    // refuser de démarrer couperait la protection jusqu'au bundle suivant. Le moteur démarre sans lui.
+    let bundle = read_bundle(rules.1).unwrap_or(None);
+    let filter = Filter::new(blocklist, bundle);
+    match Engine::start(tun, Config { filter, host }) {
         Ok(engine) => Box::into_raw(Box::new(engine)) as JLong,
         Err(_) => 0,
     }
 }
 
-// Borne mémoire : une liste au-delà est refusée plutôt que tronquée silencieusement.
-const MAX_BLOCKLIST_BYTES: u64 = 64 * 1024 * 1024;
+fn load_filter(blocklist: Option<OwnedFd>, bundle: Option<OwnedFd>) -> std::io::Result<Filter> {
+    // Les deux fd sont lus avant tout échec : chacun est fermé quoi qu'il arrive.
+    let (blocklist, bundle) = (read_blocklist(blocklist), read_bundle(bundle));
+    Ok(Filter::new(blocklist?, bundle?))
+}
 
-fn read_blocklist(fd: OwnedFd) -> std::io::Result<Blocklist> {
-    let mut text = String::new();
+fn read_blocklist(fd: Option<OwnedFd>) -> std::io::Result<Blocklist> {
+    let Some(fd) = fd else {
+        return Ok(Blocklist::empty());
+    };
+    let text = read_bounded(fd, MAX_BLOCKLIST_BYTES)?;
+    Ok(Blocklist::from_domains(&String::from_utf8_lossy(&text)))
+}
+
+fn read_bundle(fd: Option<OwnedFd>) -> std::io::Result<Option<BundleRules>> {
+    let Some(fd) = fd else {
+        return Ok(None);
+    };
+    let bytes = read_bounded(fd, MAX_BUNDLE_BYTES)?;
+    BundleRules::parse(&bytes)
+        .map(Some)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{e:?}")))
+}
+
+// Bornes mémoire : un fichier au-delà est refusé plutôt que tronqué silencieusement.
+const MAX_BLOCKLIST_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_BUNDLE_BYTES: u64 = akeeper_engine::MAX_BUNDLE as u64;
+
+fn read_bounded(fd: OwnedFd, max: u64) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
     std::fs::File::from(fd)
-        .take(MAX_BLOCKLIST_BYTES + 1)
-        .read_to_string(&mut text)?;
-    if text.len() as u64 > MAX_BLOCKLIST_BYTES {
+        .take(max + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
         return Err(std::io::Error::from(std::io::ErrorKind::FileTooLarge));
     }
-    Ok(Blocklist::from_domains(&text))
+    Ok(bytes)
 }
 
 fn set_nonblocking(fd: &OwnedFd) -> std::io::Result<()> {
@@ -272,7 +332,39 @@ mod tests {
     }
 
     fn start_with(tun: OwnedFd, blocklist: Option<OwnedFd>) -> JLong {
-        super::start(tun, blocklist, Arc::new(AllowAll))
+        super::start(tun, (blocklist, None), Arc::new(AllowAll))
+    }
+
+    fn pipe_with(bytes: &[u8]) -> OwnedFd {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        std::io::Write::write_all(&mut writer, bytes).unwrap();
+        OwnedFd::from(reader)
+    }
+
+    fn bundle(version: u64) -> Vec<u8> {
+        use akeeper_proto::bundle::{self, Section, category, kind};
+        let ads = Blocklist::from_domains("tracker.example");
+        let sections = [Section {
+            kind: kind::DOMAINS,
+            category: category::ADS,
+            data: ads.as_bytes(),
+        }];
+        let mut bytes = bundle::signed_message(0, version, 0, &sections).unwrap();
+        bytes.extend_from_slice(&[0; bundle::SIGNATURE_LEN]);
+        bytes
+    }
+
+    fn set_rules(handle: JLong, blocklist: JInt, bundle: JInt) -> JInt {
+        // SAFETY: les tests n'appellent set_rules qu'avec 0 ou un handle pas encore arrêté.
+        unsafe {
+            Java_com_akeeper_engine_NativeEngine_nativeSetRules(
+                null_mut(),
+                null_mut(),
+                handle,
+                blocklist,
+                bundle,
+            )
+        }
     }
 
     fn set_upstream(handle: JLong, slot: JInt, fd: JInt) -> JInt {
@@ -340,9 +432,47 @@ mod tests {
     }
 
     #[test]
+    fn loads_bundle_and_replaces_rules() {
+        let (_app, engine_side) = UnixDatagram::pair().unwrap();
+        let handle = super::start(
+            OwnedFd::from(engine_side),
+            (None, Some(pipe_with(&bundle(3)))),
+            Arc::new(AllowAll),
+        );
+        assert_ne!(handle, 0);
+        assert_eq!(
+            set_rules(
+                handle,
+                pipe_with(b"ads.example.net\n").into_raw_fd(),
+                pipe_with(&bundle(4)).into_raw_fd()
+            ),
+            0
+        );
+        assert_eq!(
+            set_rules(handle, -1, pipe_with(b"AKRB garbage").into_raw_fd()),
+            -1
+        );
+        assert_eq!(set_rules(handle, -1, -1), 0);
+        stop(handle);
+    }
+
+    #[test]
+    fn starts_without_an_unreadable_bundle() {
+        let (_app, engine_side) = UnixDatagram::pair().unwrap();
+        let handle = super::start(
+            OwnedFd::from(engine_side),
+            (None, Some(pipe_with(b"AKRB garbage"))),
+            Arc::new(AllowAll),
+        );
+        assert_ne!(handle, 0);
+        stop(handle);
+    }
+
+    #[test]
     fn rejects_null_handle() {
         assert_eq!(counter(0, 0), -1);
         assert_eq!(set_upstream(0, 0, -1), -1);
+        assert_eq!(set_rules(0, -1, -1), -1);
         stop(0);
     }
 }
