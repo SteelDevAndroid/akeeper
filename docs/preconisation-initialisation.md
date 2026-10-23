@@ -64,6 +64,25 @@ Pas encore livrés :
 - Un ClientHello réparti sur plusieurs enregistrements TLS n'est pas inspecté. Une app pourrait s'en servir pour contourner le filtrage SNI, mais pas le filtrage DNS.
 - Pas de SNI QUIC : UDP/443 est déjà refusé, conformément à l'écart n°5.
 
+**J5, partie 1 livrée (règles signées et mise à jour)** : le format est décrit dans `docs/bundle-regles.md`.
+- **Enveloppe** : binaire de taille fixe, signée Ed25519, qui transporte des FST déjà construits, un par catégorie, plus les plages IP DoH et le texte des licences. Le parseur Rust est borné et fuzzé (cible `bundle`).
+- **Vérification Java** (`:rules`, `BundleVerifier`) : la clé est choisie par `key_id` parmi deux clés embarquées (propriété Gradle `akeeper.rulePublicKeys`, validée). La taille doit être exacte.
+- **Anti-rollback** (`RuleStore`) : activation atomique (temporaire, fsync, `rename`, fsync du répertoire) si la version dépasse strictement le plancher. Le plancher est persistant et ne redescend jamais, même si le bundle est supprimé ; il vaut au moins `akeeper.minRuleVersion`, embarqué dans l'APK.
+- **Moteur** :
+  - le bundle vérifié est cédé par descripteur (`nativeStart`, `nativeSetRules`) ;
+  - le filtre est construit hors du thread moteur, puis remplacé d'un bloc ;
+  - la liste DoH du bundle remplace le repli embarqué ;
+  - TCP/443 vers une IP DoH signée reçoit un RST, compté par le compteur `IpBlocked` (17ᵉ compteur).
+- **Mise à jour** : `RuleUpdateWorker` (WorkManager) tourne toutes les 12 h avec réseau requis, en GET conditionnel. Il est planifié par le service, car Always-on démarre sans ouvrir l'UI.
+- **Outil** `akeeper-bundle` (`keygen`, `build`, `verify`) : un fixture signé avec une clé de test est vérifié à la fois par les tests Rust et par les tests Java.
+
+Restent pour J5 :
+- **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
+- **Pinning TLS** du serveur de règles.
+- **Bundle initial** dans l'APK.
+- **Choix des catégories** (R2).
+- **Stockage SQLCipher et journaux de flux** (purge à 7 jours).
+
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 
 ## 1. Décisions structurantes
@@ -547,6 +566,6 @@ J1 sépare deux risques : le cycle de vie Android et la politique Play d'un côt
 1. ~~Package `com.akeeper` au lieu de `com.aKeeper`.~~ **Acté** : spec mise à jour.
 2. ~~`FlowOwnerResolver` sans cache Java : c'est `FlowTable` (Rust) qui met en cache, une seule résolution par flux.~~ **Acté** : l'UID est rangé dans l'entrée de flux du moteur (`TcpStack`, `UdpNat`).
 3. ~~Préférences en `AtomicFile` + Tink `Aead` plutôt que DataStore, dont l'API coroutines est peu adaptée à une base Java.~~ **Acté** : écriture atomique (fichier temporaire, fsync, rename) + Tink AEAD, voir `AppRules`.
-4. Bundle de règles en enveloppe binaire fixe + FST, sans protobuf.
+4. ~~Bundle de règles en enveloppe binaire fixe + FST, sans protobuf.~~ **Acté** : format dans `docs/bundle-regles.md`.
 5. Extraction SNI QUIC Initial reportée après le MVP.
 6. Fuzzing nightly à 5 h 30 par cible sur runners hébergés. Les 24 h prévues exigent un runner auto-hébergé ou ClusterFuzzLite.

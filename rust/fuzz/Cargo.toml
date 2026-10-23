@@ -41,3 +41,10 @@ path = "fuzz_targets/tls.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "bundle"
+path = "fuzz_targets/bundle.rs"
+test = false
+doc = false
+bench = false

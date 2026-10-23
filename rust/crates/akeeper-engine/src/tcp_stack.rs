@@ -19,9 +19,9 @@ use smoltcp::time::Instant as SmolInstant;
 use smoltcp::wire::{HardwareAddress, IpCidr, IpListenEndpoint};
 use socket2::{Domain, Protocol, Socket, Type};
 
-use crate::SharedHost;
 use crate::filter::Filter;
 use crate::stats::{Counter, Stats};
+use crate::{HTTPS_PORT, SharedHost};
 
 /// Jetons mio des sockets amont TCP ; ceux de l'UDP NAT restent en dessous.
 pub(crate) const TOKEN_BASE: usize = 1 << 24;
@@ -136,6 +136,10 @@ impl TcpStack {
         }
     }
 
+    pub(crate) fn set_filter(&mut self, filter: Arc<Filter>) {
+        self.filter = filter;
+    }
+
     pub(crate) fn has_flows(&self) -> bool {
         !self.flows.is_empty()
     }
@@ -158,6 +162,12 @@ impl TcpStack {
     ) {
         let is_new_syn = segment.flags & tcp::SYN != 0 && segment.flags & tcp::ACK == 0;
         if is_new_syn && !self.by_endpoints.contains_key(&(segment.src, segment.dst)) {
+            // HTTPS vers un résolveur DoH connu (liste signée) : RST avant tout appel Binder ou socket amont.
+            if segment.dst.port() == HTTPS_PORT && self.filter.blocks_ip(segment.dst.ip()) {
+                stats.add(Counter::IpBlocked, 1);
+                self.device.rx.push_back(raw.to_vec());
+                return;
+            }
             // Attribution une seule fois, au SYN : l'UID reste dans l'entrée de flux.
             let uid = self.host.owner_uid(tcp::PROTO, segment.src, segment.dst);
             if uid.is_some_and(|u| blocked.contains(&u)) {

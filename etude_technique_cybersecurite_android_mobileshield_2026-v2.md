@@ -609,7 +609,7 @@ class LockdownStatusTest {
 
 - **Room + SQLCipher** : clé 256 bits aléatoire, **enveloppée** par une clé AES-GCM Keystore (`setIsStrongBoxBacked(true)` avec repli TEE) ; jamais persistée en clair.
 - **Préférences** : DataStore + Tink `Aead`, keyset protégé par Keystore (EncryptedSharedPreferences déprécié).
-- **Règles** : bundle protobuf signé **Ed25519**, deux clés publiques embarquées (rotation), `version` monotone persistée (anti-rollback), activation atomique (temporaire → vérification → `rename`).
+- **Règles** : bundle en enveloppe binaire fixe transportant des FST (écart acté, à la place du protobuf : `docs/bundle-regles.md`), signé **Ed25519**, deux clés publiques embarquées (rotation), `version` monotone persistée (anti-rollback), activation atomique (temporaire → vérification → `rename`).
 - **Journaux** : métadonnées de flux ≤ 7 jours, UID plutôt que nom de paquet, aucun contenu ; purge `WorkManager`.
 - **Backend** : TLS 1.3, pas de CA utilisateur, pinning intermédiaire + secours ; Play Integrity API vérifiée côté serveur.
 - **Attestation de clé** : vérification côté serveur de l'attestation Keystore avant tout enrôlement MDM.

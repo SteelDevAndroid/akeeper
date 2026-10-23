@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Le pin-set du serveur de règles (spec §5) arrive avec les mises à jour signées (J5), quand les vraies clés existent. -->
+<!-- Pin-set du serveur de règles (spec §5) : ajouté quand le serveur et ses certificats existeront. L'intégrité des règles repose sur Ed25519, pas sur TLS. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>

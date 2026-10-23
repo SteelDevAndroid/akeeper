@@ -8,5 +8,6 @@ android {
 
 dependencies {
     api(project(":engine"))
+    implementation(project(":rules"))
     implementation(libs.tink.android)
 }

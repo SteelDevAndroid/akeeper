@@ -1,0 +1,16 @@
+[package]
+name = "akeeper-bundle"
+description = "Outil hors appareil : construction et signature Ed25519 des bundles de règles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+akeeper-proto.workspace = true
+akeeper-engine.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+
+[lints]
+workspace = true

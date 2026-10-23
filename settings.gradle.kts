@@ -16,4 +16,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "akeeper"
-include(":app", ":vpn", ":engine")
+include(":app", ":vpn", ":engine", ":rules")

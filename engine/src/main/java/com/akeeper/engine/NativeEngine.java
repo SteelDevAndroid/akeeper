@@ -20,7 +20,7 @@ public final class NativeEngine implements AutoCloseable {
     /** Indices partagés avec {@code akeeper_engine::Counter} : l'ordre fait partie du contrat JNI. */
     public enum Counter {
         PACKETS, BYTES, MALFORMED, TCP, UDP, ICMP, DNS_QUERIES, DNS_BLOCKED, DNS_UPSTREAM_FAILURES,
-        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES, APP_BLOCKED, SNI_BLOCKED, DOT_BLOCKED
+        QUIC_BLOCKED, UDP_NAT_FAILURES, TCP_FLOWS, TCP_FAILURES, APP_BLOCKED, SNI_BLOCKED, DOT_BLOCKED, IP_BLOCKED
     }
 
     /** Rappelé par le thread natif, une fois par socket ou par nouveau flux : doit rester rapide. */
@@ -45,13 +45,15 @@ public final class NativeEngine implements AutoCloseable {
     }
 
     /**
-     * Le moteur prend possession des deux fd détachés et les ferme, y compris en cas d'échec.
+     * Le moteur prend possession des fd détachés et les ferme, y compris en cas d'échec. Une liste personnelle
+     * illisible fait échouer le démarrage ; un bundle illisible est ignoré (liste personnelle et repli DoH seuls).
      *
-     * @param blocklistFd liste de domaines, un par ligne ; -1 pour une liste vide
+     * @param blocklistFd liste personnelle de domaines, un par ligne ; -1 pour une liste vide
+     * @param bundleFd    bundle de règles <b>déjà vérifié</b> ({@code RuleStore.openActive}) ; -1 si absent
      * @param host        référencé par le moteur jusqu'à {@link #close()}
      */
-    public static NativeEngine start(int detachedTunFd, int blocklistFd, Host host) {
-        long h = nativeStart(detachedTunFd, blocklistFd, host);
+    public static NativeEngine start(int detachedTunFd, int blocklistFd, int bundleFd, Host host) {
+        long h = nativeStart(detachedTunFd, blocklistFd, bundleFd, host);
         if (h == 0) {
             throw new IllegalStateException("Démarrage du moteur natif impossible");
         }
@@ -77,6 +79,21 @@ public final class NativeEngine implements AutoCloseable {
         return handle != 0 && nativeSetBlockedUids(handle, uids) == 0;
     }
 
+    /**
+     * Remplace toutes les règles d'un bloc ; le filtre est construit sur le thread appelant, pas sur celui du
+     * moteur. Les fd détachés sont fermés dans tous les cas.
+     *
+     * @return {@code false} si le moteur est arrêté ou les règles illisibles : les règles en place restent actives
+     */
+    public synchronized boolean setRules(int blocklistFd, int bundleFd) {
+        if (handle == 0) {
+            closeQuietly(blocklistFd);
+            closeQuietly(bundleFd);
+            return false;
+        }
+        return nativeSetRules(handle, blocklistFd, bundleFd) == 0;
+    }
+
     /** Renvoie -1 une fois le moteur arrêté. */
     public synchronized long counter(Counter counter) {
         return handle == 0 ? -1 : nativeCounter(handle, counter.ordinal());
@@ -100,7 +117,9 @@ public final class NativeEngine implements AutoCloseable {
         }
     }
 
-    private static native long nativeStart(int tunFd, int blocklistFd, Host host);
+    private static native long nativeStart(int tunFd, int blocklistFd, int bundleFd, Host host);
+
+    private static native int nativeSetRules(long handle, int blocklistFd, int bundleFd);
 
     private static native int nativeSetUpstream(long handle, int slot, int fd);
 

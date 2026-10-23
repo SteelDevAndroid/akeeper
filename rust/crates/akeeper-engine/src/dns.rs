@@ -49,6 +49,10 @@ impl Resolver {
         }
     }
 
+    pub(crate) fn set_filter(&mut self, filter: Arc<Filter>) {
+        self.filter = filter;
+    }
+
     pub fn upstream(&self, slot: usize) -> Option<&UdpSocket> {
         self.upstreams.get(slot)?.as_ref()
     }
