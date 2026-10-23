@@ -183,7 +183,8 @@ dependencies {
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:label="@string/app_name">
+        android:label="@string/app_name"
+        android:theme="@style/Theme.AKeeper">
 
         <service
             android:name=".vpn.ShieldVpnService"

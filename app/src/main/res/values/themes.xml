@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.AKeeper" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/akeeper_primary</item>
+        <item name="colorOnPrimary">@color/akeeper_on_primary</item>
+        <item name="colorPrimaryContainer">@color/akeeper_turquoise</item>
+        <item name="colorOnPrimaryContainer">@color/akeeper_midnight</item>
+        <item name="colorSecondary">@color/akeeper_link</item>
+        <item name="colorOnSecondary">@color/akeeper_on_primary</item>
+        <!-- Indicateur d'onglet actif de la NavigationBar M3. -->
+        <item name="colorSecondaryContainer">@color/akeeper_turquoise</item>
+        <item name="colorOnSecondaryContainer">@color/akeeper_midnight</item>
+        <item name="colorTertiary">@color/akeeper_link</item>
+        <item name="colorOnTertiary">@color/akeeper_on_primary</item>
+
+        <item name="android:colorBackground">@color/akeeper_background</item>
+        <item name="colorOnBackground">@color/akeeper_on_background</item>
+        <item name="colorSurface">@color/akeeper_background</item>
+        <item name="colorOnSurface">@color/akeeper_on_background</item>
+        <item name="colorOnSurfaceVariant">@color/akeeper_on_background_variant</item>
+        <item name="colorSurfaceContainerLowest">@color/akeeper_card</item>
+        <item name="colorSurfaceContainerLow">@color/akeeper_card</item>
+        <item name="colorSurfaceContainer">@color/akeeper_card</item>
+        <item name="colorSurfaceContainerHigh">@color/akeeper_card</item>
+        <item name="colorSurfaceContainerHighest">@color/akeeper_card</item>
+        <item name="colorOutline">@color/akeeper_outline</item>
+        <item name="colorOutlineVariant">@color/akeeper_outline_variant</item>
+
+        <!-- Le rouge est réservé aux états de sécurité : les erreurs de saisie restent en couleur de texte. -->
+        <item name="colorError">@color/akeeper_on_background</item>
+        <item name="colorOnError">@color/akeeper_background</item>
+        <item name="colorErrorContainer">@color/akeeper_outline_variant</item>
+        <item name="colorOnErrorContainer">@color/akeeper_on_background</item>
+
+        <item name="materialSwitchStyle">@style/Widget.AKeeper.Switch</item>
+        <item name="android:windowLightStatusBar">@bool/akeeper_light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/akeeper_light_system_bars</item>
+    </style>
+
+    <style name="Widget.AKeeper.Switch" parent="Widget.Material3.CompoundButton.MaterialSwitch">
+        <item name="trackTint">@color/akeeper_switch_track</item>
+        <item name="thumbTint">@color/akeeper_switch_thumb</item>
+        <item name="trackDecorationTint">@color/akeeper_switch_track_decoration</item>
+    </style>
+
+
+</resources>
