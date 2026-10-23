@@ -49,4 +49,27 @@
     <string name="home_dns_blocked">requêtes bloquées</string>
     <string name="home_notifications_title">Notifications désactivées</string>
     <string name="home_notifications_body">Vous ne serez pas alerté si la protection s\'arrête.</string>
+
+    <string name="nav_home">Accueil</string>
+    <string name="nav_apps">Apps</string>
+    <string name="action_cancel">Annuler</string>
+    <string name="action_undo">Annuler</string>
+    <string name="apps_search_hint">Rechercher une app</string>
+    <string name="apps_scope_all">Toutes</string>
+    <string name="apps_scope_blocked">Bloquées</string>
+    <string name="apps_scope_system">Système</string>
+    <string name="apps_empty">Aucune app ne correspond.</string>
+    <string name="apps_rules_unavailable">Règles par app indisponibles : le stockage sécurisé de l\'appareil ne répond pas.</string>
+    <string name="apps_toggle_description">Accès Internet pour %1$s</string>
+    <string name="apps_blocked">%1$s n\'a plus accès à Internet</string>
+    <string name="apps_allowed">%1$s a de nouveau accès à Internet</string>
+    <string name="apps_save_failed">Enregistrement impossible, la règle n\'a pas changé.</string>
+    <string name="apps_system_confirm_title">Bloquer %1$s ?</string>
+    <string name="apps_system_confirm_body">C\'est une app système. Certaines fonctions du téléphone peuvent cesser de marcher.</string>
+    <string name="apps_system_confirm_action">Bloquer</string>
+    <plurals name="apps_shared">
+        <item quantity="one">Accès réseau partagé avec %d autre app</item>
+        <item quantity="many">Accès réseau partagé avec %d autres apps</item>
+        <item quantity="other">Accès réseau partagé avec %d autres apps</item>
+    </plurals>
 </resources>

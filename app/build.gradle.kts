@@ -21,4 +21,5 @@ dependencies {
     implementation(project(":vpn"))
     implementation(project(":engine"))
     implementation(libs.material)
+    implementation(libs.recyclerview)
 }

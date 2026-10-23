@@ -14,6 +14,8 @@ import com.akeeper.engine.NativeEngine;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 
 /** Toutes les méthodes s'exécutent sur le thread principal : aucun champ n'est partagé entre threads. */
 public final class ShieldVpnService extends VpnService {
@@ -25,6 +27,7 @@ public final class ShieldVpnService extends VpnService {
 
     private NativeEngine engine;
     private UpstreamDns upstream;
+    private ShieldStatus.Subscription appRules;
 
     /** Prérequis : {@link VpnService#prepare} a renvoyé {@code null} (consentement accordé). */
     public static void start(Context context) {
@@ -78,10 +81,24 @@ public final class ShieldVpnService extends VpnService {
             return false;
         }
         ShieldStatus.attach(engine);
+        applyAppRules();
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
                 this::followUnderlying);
         upstream.start(new Handler(Looper.getMainLooper()));
         return true;
+    }
+
+    private void applyAppRules() {
+        try {
+            // Moteur capturé : l'observateur tourne sur le thread de l'UI qui écrit les règles, pendant qu'un
+            // arrêt peut remettre le champ à null. Après close(), setBlockedUids() est simplement sans effet.
+            var current = engine;
+            appRules = AppRules.get(this).observe(packages ->
+                    current.setBlockedUids(AppRules.uids(getPackageManager(), packages)));
+        } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+            // Keystore indisponible : aucune règle par app, mais le filtrage DNS et l'anti-évasion restent actifs.
+            appRules = null;
+        }
     }
 
     /** Appelé depuis le thread natif : protect() et getConnectionOwnerUid() sont sûrs hors thread principal. */
@@ -138,6 +155,10 @@ public final class ShieldVpnService extends VpnService {
     }
 
     private void shutdown() {
+        if (appRules != null) {
+            appRules.close();
+            appRules = null;
+        }
         if (upstream != null) {
             upstream.close();
             upstream = null;

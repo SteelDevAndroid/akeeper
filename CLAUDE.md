@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). Milestones J0 (build chain), J1 (DNS filtering) and J2 (full tunnel) are in place. All milestones are listed in `docs/preconisation-initialisation.md` §5, and its "Avancement" section tracks what each delivered and deferred.
+aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local full-tunnel, no remote server). Milestones J0 (build chain), J1 (DNS filtering), J2 (full tunnel) and J3 (per-app firewall) are in place. All milestones are listed in `docs/preconisation-initialisation.md` §5, and its "Avancement" section tracks what each delivered and deferred.
 
 - `etude_technique_cybersecurite_android_mobileshield_2026-v2.md` (French) is the source of truth. Part I corrects earlier assumptions; Part II is the implementation spec. Update it when a design decision changes.
 - `docs/preconisation-initialisation.md` refines it for the bootstrap. Approved deviation: the Rust flow tables (`TcpStack`, `UdpNat`) are the single attribution cache; `FlowOwnerResolver` is a plain uncached call. Still to approve: a fixed binary rule envelope with an FST payload instead of protobuf.
@@ -13,13 +13,18 @@ aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local 
 - Package is `com.akeeper` (lowercase, approved).
 
 Layout:
-- `app/`: `ui.MainActivity`, the only Activity. It shows onboarding O1–O4, then home A1, with no Fragments.
+- `app/`: `ui.MainActivity`, the only Activity. It shows onboarding O1–O4, then the Home (A1) and Apps (A2) tabs, with no Fragments.
+  - `AppsScreen` loads apps through `AppCatalog` on a worker thread. The list comes from `QUERY_ALL_PACKAGES` (approved, needs a Play declaration), filtered to apps requesting INTERNET.
+  - Toggling an app writes `AppRules`; apps that share a UID are toggled together, because the engine blocks by UID.
   - The onboarding step is derived from system state by `OnboardingFlow` (VPN consent, notification permission, `LockdownStatus`); nothing is persisted except a `noBackupFilesDir/onboarding_done` marker.
   - The home state comes from `HomeState.of(ShieldStatus.Snapshot)`.
 - `vpn/`:
   - `ShieldVpnService`: FGS `systemExempted`. It routes everything (`0.0.0.0/0` and `::/0`). There is no LAN exclusion yet, because the R1 opt-in doesn't exist.
   - `UpstreamDns`: follows the best non-VPN network and hands the engine one protected, connected UDP socket per DNS server (max 4).
   - `ShieldStatus`: lock-free state and counter holder observed by the UI.
+  - `AppRules`: blocked package names in `noBackupFilesDir/app_rules.bin`, written atomically (temp file, fsync, rename) and encrypted with Tink AEAD. The keyset is wrapped by an Android Keystore key, and associated data binds the file to its purpose. This is the approved alternative to DataStore.
+    - The service observes it and pushes UIDs to the engine via `setBlockedUids`.
+    - An unreadable or tampered file yields no rules.
   - Also: the spec's `ShieldPolicy`, `LockdownStatus`, `FlowOwnerResolver` and `com.akeeper.security.AdvancedProtectionPolicy`.
 - `engine/`: `NativeEngine` (JNI). The `cargoNdk<Variant>` task builds `rust/` and feeds the `.so` to the variant's `jniLibs`.
 - `rust/`:
@@ -100,7 +105,7 @@ These come from the spec. Breaking any of them is a security regression.
 - **No TLS MITM.** Evasion handling (§6): DNAT stray port-53 traffic to the local resolver, RST TCP/853 to the virtual DNS IP, NODATA for DNS type 65 (kills ECH), NXDOMAIN for `use-application-dns.net`, ICMP unreachable for UDP/443 (forces QUIC to fall back to TCP), a signed DoH IP/SNI blocklist.
 - `getConnectionOwnerUid()` needs no permission, only the active VPN role. It is called once per new flow, from the engine thread; the UID is kept in the flow entry (approved deviation from the spec's Java LRU).
 - Components are non-exported, `PendingIntent.FLAG_IMMUTABLE`, receivers `RECEIVER_NOT_EXPORTED`, and a received `Intent` is never re-launched as-is.
-- Storage (§7): Room + SQLCipher with a key wrapped by Keystore AES-GCM (StrongBox first, TEE fallback). Preferences use DataStore + Tink AEAD. **Do not use `EncryptedSharedPreferences`** (deprecated).
+- Storage (§7): Room + SQLCipher with a key wrapped by Keystore AES-GCM (StrongBox first, TEE fallback). Preferences use an atomically written file + Tink AEAD (approved alternative to DataStore, see `AppRules`). **Do not use `EncryptedSharedPreferences`** (deprecated).
 - Rule bundles are protobuf signed with **Ed25519** (two embedded public keys for rotation), carry a monotonic version (anti-rollback) and are activated atomically (temp file → verify → rename). Never use HMAC.
 - `allowBackup="false"` and `dataExtractionRules` exclude every domain. Flow logs keep metadata only, use UIDs, and are retained ≤ 7 days.
 - Native engine: Rust, no `unsafe` outside FFI, errors as `Result`, never `panic` on the network path, strict size limits.

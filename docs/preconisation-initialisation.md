@@ -43,6 +43,17 @@ Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. 
   - survie sous Doze.
 - **Rappel JNI `protect()`** : non testé hors appareil, les tests Rust injectent un `Protector` en mémoire.
 
+**J3 livré (pare-feu par app)** :
+- **Attribution** : l'UID de chaque nouveau flux est résolu une seule fois, puis gardé dans la table de flux du moteur.
+- **Blocage** : RST côté TCP et ICMP « port inaccessible » côté UDP. Les flux déjà ouverts sont coupés au changement de règle.
+- **Écran Apps (A2)** : recherche, filtres Toutes / Bloquées / Système, interrupteur avec « Annuler », confirmation pour une app système. Les apps à UID partagé sont basculées ensemble.
+- **Persistance** : `AppRules`, chiffré par Tink.
+- **Liste complète** : obtenue via `QUERY_ALL_PACKAGES`, qui doit être déclarée dans la Play Console.
+
+Pas encore livrés :
+- le détail d'app A3, le filtre « Récentes » et les volumes par app, faute de compteurs par UID ;
+- le recalcul des UID à l'installation d'une app pendant que le service tourne. Les UID sont recalculés au démarrage du service et à chaque modification des règles.
+
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 
 ## 1. Décisions structurantes
@@ -525,7 +536,7 @@ J1 sépare deux risques : le cycle de vie Android et la politique Play d'un côt
 
 1. ~~Package `com.akeeper` au lieu de `com.aKeeper`.~~ **Acté** : spec mise à jour.
 2. ~~`FlowOwnerResolver` sans cache Java : c'est `FlowTable` (Rust) qui met en cache, une seule résolution par flux.~~ **Acté** : l'UID est rangé dans l'entrée de flux du moteur (`TcpStack`, `UdpNat`).
-3. Préférences en `AtomicFile` + Tink `Aead` plutôt que DataStore, dont l'API coroutines est peu adaptée à une base Java.
+3. ~~Préférences en `AtomicFile` + Tink `Aead` plutôt que DataStore, dont l'API coroutines est peu adaptée à une base Java.~~ **Acté** : écriture atomique (fichier temporaire, fsync, rename) + Tink AEAD, voir `AppRules`.
 4. Bundle de règles en enveloppe binaire fixe + FST, sans protobuf.
 5. Extraction SNI QUIC Initial reportée après le MVP.
 6. Fuzzing nightly à 5 h 30 par cible sur runners hébergés. Les 24 h prévues exigent un runner auto-hébergé ou ClusterFuzzLite.
