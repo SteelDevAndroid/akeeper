@@ -118,4 +118,10 @@
     <string name="crash_intro">Voici la cause relevée. Rien n\'a été envoyé : copiez ce texte pour le transmettre.</string>
     <string name="crash_copy">Copier</string>
     <string name="crash_copied">Texte copié</string>
+
+    <string name="home_level_paused">En pause</string>
+    <string name="home_paused_title">En pause — reprise à %1$s</string>
+    <string name="home_paused_sub">Les sites ne sont plus filtrés. Les règles par app restent actives.</string>
+    <string name="home_pause_action">Pause 15 min</string>
+    <string name="home_resume_action">Reprendre maintenant</string>
 </resources>

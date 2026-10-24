@@ -30,6 +30,10 @@ public final class ShieldVpnService extends VpnService {
     static final String DNS_V6 = "fd00:6d73::53";
     /** Liste personnelle de domaines bloqués, un par ligne, dans {@code filesDir}. */
     public static final String BLOCKLIST_FILE = "blocklist.txt";
+    /** Durée de la pause proposée par l'accueil (docs/ui-ecrans.md, A1). */
+    public static final long PAUSE_MILLIS = 15 * 60 * 1000L;
+    private static final String ACTION_PAUSE = "com.akeeper.vpn.PAUSE";
+    private static final String ACTION_RESUME = "com.akeeper.vpn.RESUME";
 
     // Les rappels réseau de UpstreamDns arrivent sur leur propre thread : l'état du service reste au thread principal.
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -38,10 +42,22 @@ public final class ShieldVpnService extends VpnService {
     private ShieldStatus.Subscription appRules;
     private RuleStore.Subscription ruleUpdates;
     private boolean privateDnsStrict;
+    // Fin de la pause en horloge murale, pour l'affichage ; le moteur mesure la durée avec son horloge monotone.
+    private long pausedUntil;
+    private final Runnable endPause = this::endPause;
 
     /** Prérequis : {@link VpnService#prepare} a renvoyé {@code null} (consentement accordé). */
     public static void start(Context context) {
         context.startForegroundService(new Intent(context, ShieldVpnService.class));
+    }
+
+    /** Suspend les blocages pendant {@link #PAUSE_MILLIS} ; le service doit déjà tourner. */
+    public static void pause(Context context) {
+        context.startService(new Intent(context, ShieldVpnService.class).setAction(ACTION_PAUSE));
+    }
+
+    public static void resume(Context context) {
+        context.startService(new Intent(context, ShieldVpnService.class).setAction(ACTION_RESUME));
     }
 
     @Override
@@ -60,9 +76,34 @@ public final class ShieldVpnService extends VpnService {
             stopSelf();
             return START_NOT_STICKY;
         }
+        // Seule l'action est lue : un Intent reçu n'est jamais relancé tel quel.
+        var action = intent == null ? null : intent.getAction();
+        if (ACTION_PAUSE.equals(action)) {
+            startPause();
+        } else if (ACTION_RESUME.equals(action)) {
+            endPause();
+        }
         ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled()),
-                privateDnsStrict));
+                privateDnsStrict, pausedUntil));
         return START_STICKY;
+    }
+
+    private void startPause() {
+        if (engine == null || !engine.pause(PAUSE_MILLIS)) {
+            return;
+        }
+        pausedUntil = System.currentTimeMillis() + PAUSE_MILLIS;
+        main.removeCallbacks(endPause);
+        main.postDelayed(endPause, PAUSE_MILLIS);
+    }
+
+    private void endPause() {
+        main.removeCallbacks(endPause);
+        pausedUntil = 0;
+        if (engine != null) {
+            engine.resume();
+        }
+        ShieldStatus.publish(ShieldStatus.current().withPausedUntil(0));
     }
 
     private boolean establish() {
@@ -195,6 +236,8 @@ public final class ShieldVpnService extends VpnService {
     }
 
     private void shutdown() {
+        main.removeCallbacks(endPause);
+        pausedUntil = 0;
         if (ruleUpdates != null) {
             ruleUpdates.close();
             ruleUpdates = null;

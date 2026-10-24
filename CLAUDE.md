@@ -19,11 +19,11 @@ Layout:
   - `SettingsScreen` (R1) shows the rules version/date with an update-now button (only when `akeeper.rulesUrl` is set), the lockdown state, the battery guide for the OEMs in `OemGuide`, and R3 and Licences as dialogs. The Licences dialog shows the `NOTICE` of the verified active bundle. Settings with nothing behind them (LAN, logs, categories) are not shown yet.
   - `CrashReport` (installed by `AKeeperApplication`) writes the last uncaught exception to `noBackupFilesDir/last_crash.txt` and reads `ApplicationExitInfo` for native crashes, ANRs and signals. `MainActivity` shows the report at the next launch with a Copy button and does not restart the VPN service until it is dismissed. Nothing is sent anywhere.
   - The onboarding step is derived from system state by `OnboardingFlow` (VPN consent, notification permission, `LockdownStatus`); nothing is persisted except a `noBackupFilesDir/onboarding_done` marker.
-  - The home state comes from `HomeState.of(ShieldStatus.Snapshot)`.
+  - The home state comes from `HomeState.of(ShieldStatus.Snapshot)`. `PAUSED` ranks below every degraded state and above `PROTECTED`; the Home offers **Pause 15 min** and **Reprendre maintenant** through `ShieldVpnService.pause/resume`, which send an action `Intent` to the running service.
 - `vpn/`:
   - `ShieldVpnService`: FGS `systemExempted`. It routes everything (`0.0.0.0/0` and `::/0`). There is no LAN exclusion yet, because the R1 opt-in doesn't exist.
   - `UpstreamDns`: follows the best non-VPN network and hands the engine one protected, connected UDP socket per DNS server (max 4).
-  - `ShieldStatus`: lock-free state and counter holder observed by the UI.
+  - `ShieldStatus`: lock-free state and counter holder observed by the UI. `Snapshot.pausedUntil` is a wall-clock time for display only; the service ends the pause on a timer and the engine ends it on its own clock, and a service restart drops the pause.
   - `AppRules`: blocked package names in `noBackupFilesDir/app_rules.bin`, written atomically (temp file, fsync, rename) and encrypted with Tink AEAD. The keyset is wrapped by an Android Keystore key, and associated data binds the file to its purpose. This is the approved alternative to DataStore.
     - The service observes it and pushes UIDs to the engine via `setBlockedUids`.
     - An unreadable or tampered file yields no rules.
@@ -56,6 +56,7 @@ Engine verdicts (spec §6). Anything not listed is dropped (ICMP echo included):
 - **TCP/443 to a DoH resolver address from the bundle**: RST on the SYN, before any owner lookup or upstream socket (counted as `IpBlocked`).
 - **TCP/853 to a third-party server** is counted as `DotBlocked`, a strict Private DNS signal. Detection itself comes from `LinkProperties.getPrivateDnsServerName()` in `UpstreamDns`, which raises `Snapshot.privateDnsStrict`, the amber home state and an alert notification.
 - **Other TCP**: terminated by `TcpStack` and relayed over a protected socket. Caps: 512 flows, 64 KiB buffers. The upstream connect starts on the SYN; if it fails, the app gets a RST.
+- **Pause** (`Engine::pause`, capped at `MAX_PAUSE` = 1 h, resumes by itself on the engine's monotonic clock): the personal blocklist, the bundle categories, the DoH names and the DoH addresses stop blocking, and a rules replacement keeps the pause. The per-app firewall and the evasion defences (NODATA for type 65, the DoH canary, QUIC refusal, DoT RST) stay on.
 - **Per-app firewall**: a new flow from a blocked UID is refused: RST for TCP, ICMP port unreachable for UDP. `setBlockedUids` also cuts that UID's open flows. An unknown UID (-1) is allowed.
 - **Never send through an unprotected socket**: if `protect()` returns false, the flow is refused (counted as `UdpNatFailures` / `TcpFailures`).
 - **IPv4 fragments are dropped.**
@@ -63,7 +64,7 @@ Engine verdicts (spec §6). Anything not listed is dropped (ICMP echo included):
 The personal blocklist is `filesDir/blocklist.txt`, one domain per line, read at start and on each bundle activation; there is no UI for it yet.
 
 JNI contract:
-- `nativeStart(tunFd, blocklistFd, bundleFd, host)`, `nativeSetRules(handle, blocklistFd, bundleFd)`, `nativeSetUpstream(handle, slot, fd)`, `nativeSetBlockedUids(handle, int[])`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given (-1 means absent).
+- `nativeStart(tunFd, blocklistFd, bundleFd, host)`, `nativeSetRules(handle, blocklistFd, bundleFd)`, `nativePause(handle, millis)`, `nativeSetUpstream(handle, slot, fd)`, `nativeSetBlockedUids(handle, int[])`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given (-1 means absent).
 - An unreadable personal blocklist makes `nativeStart` fail. An unreadable bundle is skipped at start, because the anti-rollback floor would otherwise keep protection off until the next bundle; `nativeSetRules` returns -1 and keeps the current rules. The bundle fd must come from `RuleStore.openActive()`, because the engine does not check signatures.
 - `host` is a `NativeEngine.Host` held as a global ref. The engine thread stays attached to the JVM and calls it: `protect(int)` per socket, and `ownerUid(...)` once per new flow (`FlowOwnerResolver`, uncached).
 - Every callback runs inside a JNI local frame, because that thread never returns to Java and local refs would leak.
