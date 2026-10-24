@@ -24,6 +24,15 @@
             android:textStyle="bold" />
 
         <ImageButton
+            android:id="@+id/activity_search_button"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/activity_search_open"
+            android:src="@drawable/ic_search"
+            app:tint="?attr/colorOnSurface" />
+
+        <ImageButton
             android:id="@+id/settings_button"
             android:layout_width="48dp"
             android:layout_height="48dp"
@@ -34,11 +43,81 @@
             app:tint="?attr/colorOnSurface" />
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/activity_summary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginBottom="4dp"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurface" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:paddingHorizontal="16dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/activity_scopes"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="0dp"
+            app:singleLine="true"
+            app:checkedChip="@id/activity_scope_blocked"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/activity_scope_blocked"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/activity_scope_blocked" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/activity_scope_allowed"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/activity_scope_allowed" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/activity_scope_all"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/activity_scope_all" />
+        </com.google.android.material.chip.ChipGroup>
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/activity_app_chip"
+            style="@style/Widget.Material3.Chip.Filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:checkable="false"
+            android:text="@string/activity_all_apps"
+            app:closeIcon="@drawable/ic_close"
+            app:closeIconVisible="false" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
     <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/activity_search_layout"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="8dp"
+        android:visibility="gone"
         android:hint="@string/activity_search_hint"
         app:startIconDrawable="@drawable/ic_search">
 
@@ -50,55 +129,6 @@
             android:inputType="text"
             android:maxLines="1" />
     </com.google.android.material.textfield.TextInputLayout>
-
-    <com.google.android.material.chip.ChipGroup
-        android:id="@+id/activity_scopes"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="8dp"
-        app:checkedChip="@id/activity_scope_blocked"
-        app:selectionRequired="true"
-        app:singleSelection="true">
-
-        <com.google.android.material.chip.Chip
-            android:id="@+id/activity_scope_blocked"
-            style="@style/Widget.Material3.Chip.Filter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/activity_scope_blocked" />
-
-        <com.google.android.material.chip.Chip
-            android:id="@+id/activity_scope_allowed"
-            style="@style/Widget.Material3.Chip.Filter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/activity_scope_allowed" />
-
-        <com.google.android.material.chip.Chip
-            android:id="@+id/activity_scope_all"
-            style="@style/Widget.Material3.Chip.Filter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/activity_scope_all" />
-    </com.google.android.material.chip.ChipGroup>
-
-    <com.google.android.material.chip.Chip
-        android:id="@+id/activity_app_chip"
-        style="@style/Widget.Material3.Chip.Assist"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:text="@string/activity_all_apps" />
-
-    <TextView
-        android:id="@+id/activity_summary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="20dp"
-        android:layout_marginTop="4dp"
-        android:textAppearance="?attr/textAppearanceBodyMedium"
-        android:textColor="?attr/colorOnSurfaceVariant" />
 
     <LinearLayout
         android:id="@+id/activity_empty"

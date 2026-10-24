@@ -68,6 +68,23 @@ public class ScreensInflationTest {
     }
 
     @Test
+    public void theActivitySearchStaysFoldedUntilAsked() {
+        var activity = activity();
+        activity.setContentView(R.layout.screen_activity);
+        View root = activity.findViewById(R.id.root);
+        var screen = new ActivityScreen(activity, root);
+        View search = root.findViewById(R.id.activity_search_layout);
+        View button = root.findViewById(R.id.activity_search_button);
+
+        assertThat(search.getVisibility()).isEqualTo(View.GONE);
+        button.performClick();
+        assertThat(search.getVisibility()).isEqualTo(View.VISIBLE);
+        button.performClick();
+        assertThat(search.getVisibility()).isEqualTo(View.GONE);
+        screen.close();
+    }
+
+    @Test
     public void bindsTheAppsScreen() {
         var activity = activity();
         activity.setContentView(R.layout.screen_apps);

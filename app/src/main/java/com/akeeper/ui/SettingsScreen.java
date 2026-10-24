@@ -108,7 +108,7 @@ final class SettingsScreen implements AutoCloseable {
         ((TextView) row.findViewById(R.id.row_title)).setText(R.string.settings_lan_title);
         var subtitle = (TextView) row.findViewById(R.id.row_subtitle);
         subtitle.setText(R.string.settings_lan_subtitle);
-        MaterialSwitch toggle = row.findViewById(R.id.row_switch);
+        MaterialSwitch toggle = SwitchRow.bind(row);
         toggle.setEnabled(false);
         network.addView(row);
         try {
@@ -167,12 +167,11 @@ final class SettingsScreen implements AutoCloseable {
         var logRow = activity.getLayoutInflater().inflate(R.layout.item_switch_row, privacy, false);
         ((TextView) logRow.findViewById(R.id.row_title)).setText(R.string.settings_log_title);
         ((TextView) logRow.findViewById(R.id.row_subtitle)).setText(R.string.settings_log_subtitle);
-        MaterialSwitch logSwitch = logRow.findViewById(R.id.row_switch);
+        MaterialSwitch logSwitch = SwitchRow.bind(logRow);
         // Inactif tant que les préférences ne sont pas lues (et si le Keystore est indisponible).
         logSwitch.setEnabled(false);
         privacy.addView(logRow);
         var retentionRow = addRow(privacy, -1, R.string.settings_retention_title, "");
-        retentionRow.findViewById(R.id.row_chevron).setVisibility(View.GONE);
         retentionRow.setEnabled(false);
         var retentionValue = (TextView) retentionRow.findViewById(R.id.row_subtitle);
         addRow(privacy, -1, R.string.settings_clear_title, null).setOnClickListener(v -> confirmClear(root));
@@ -197,6 +196,7 @@ final class SettingsScreen implements AutoCloseable {
                              View root) {
         if (prefs == null) {
             retentionValue.setText(R.string.settings_log_unavailable);
+            retentionRow.findViewById(R.id.row_chevron).setVisibility(View.GONE);
             return;
         }
         logSwitch.setChecked(prefs.settings().logEnabled());

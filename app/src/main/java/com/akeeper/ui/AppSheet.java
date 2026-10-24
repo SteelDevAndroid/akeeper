@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  */
 final class AppSheet {
 
-    private static final int LIMIT = 100;
+    private static final int LIMIT = 50;
 
     private AppSheet() {
     }
@@ -107,6 +107,7 @@ final class AppSheet {
                     }
                     adapter.submit(shown);
                     view.findViewById(R.id.sheet_app_empty).setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+                    events.setVisibility(shown.isEmpty() ? View.GONE : View.VISIBLE);
                 });
             });
         } catch (RejectedExecutionException closed) {

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Le contenu défile avec la fiche : la liste d'événements prend la hauteur dont elle a besoin. -->
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+<LinearLayout
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -93,5 +98,8 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/sheet_app_events"
         android:layout_width="match_parent"
-        android:layout_height="280dp" />
+        android:layout_height="wrap_content"
+        android:nestedScrollingEnabled="false"
+        android:overScrollMode="never" />
 </LinearLayout>
+</androidx.core.widget.NestedScrollView>

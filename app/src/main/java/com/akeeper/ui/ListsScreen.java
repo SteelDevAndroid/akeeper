@@ -76,7 +76,7 @@ final class ListsScreen implements AutoCloseable {
         ((TextView) row.findViewById(R.id.row_title)).setText(title);
         ((TextView) row.findViewById(R.id.row_subtitle)).setText(subtitle);
         // Inactif tant que l'on ignore ce que contiennent les règles et si les préférences sont lisibles.
-        row.findViewById(R.id.row_switch).setEnabled(false);
+        SwitchRow.bind(row).setEnabled(false);
         parent.addView(row);
         categoryRows.put(category, row);
     }
