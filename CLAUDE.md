@@ -17,6 +17,7 @@ Layout:
   - `AppsScreen` loads apps through `AppCatalog` on a worker thread. The list comes from `QUERY_ALL_PACKAGES` (approved, needs a Play declaration), filtered to apps requesting INTERNET.
   - Toggling an app writes `AppRules`; apps that share a UID are toggled together, because the engine blocks by UID.
   - `SettingsScreen` (R1) shows the rules version/date with an update-now button (only when `akeeper.rulesUrl` is set), the lockdown state, the battery guide for the OEMs in `OemGuide`, and R3 and Licences as dialogs. The Licences dialog shows the `NOTICE` of the verified active bundle. Settings with nothing behind them (LAN, logs, categories) are not shown yet.
+  - `CrashReport` (installed by `AKeeperApplication`) writes the last uncaught exception to `noBackupFilesDir/last_crash.txt` and reads `ApplicationExitInfo` for native crashes, ANRs and signals. `MainActivity` shows the report at the next launch with a Copy button and does not restart the VPN service until it is dismissed. Nothing is sent anywhere.
   - The onboarding step is derived from system state by `OnboardingFlow` (VPN consent, notification permission, `LockdownStatus`); nothing is persisted except a `noBackupFilesDir/onboarding_done` marker.
   - The home state comes from `HomeState.of(ShieldStatus.Snapshot)`.
 - `vpn/`:
@@ -89,7 +90,8 @@ cargo run -p akeeper-bundle -- verify bundle.akrb <key0 hex> [<key1 hex>]
 cargo +nightly fuzz run packet -- -max_total_time=60
 ```
 
-- **No emulator here**: this container has no KVM, so VPN behaviour is only covered by JVM and Rust tests. Validate on a device.
+- **No emulator here**: this container has no KVM, and a software-only emulator never finishes booting (the Android watchdog keeps killing `system_server`). VPN behaviour is covered by JVM and Rust tests; validate on a device.
+- **JVM tests of the UI and the JNI boundary**: `app` tests run under Robolectric (JUnit 4 through the vintage engine, SDK 36, extra `--add-opens` in `app/build.gradle.kts`) and inflate every layout. `ShieldVpnService` cannot run there, because the JDK has no `InetAddress.parseNumericAddress`. `engine` tests (`NativeEngineJniTest`) run the real native library built for the host by `cargoHostBuild`, with a loopback TCP connection as the TUN, and check the `protect` and `ownerUid` callbacks, the per-app firewall and shutdown. They need `cargo` on the path.
 - **Lint `ForegroundServicePermission`**: it is suppressed on the service on purpose. Lint doesn't know the VPN runtime prerequisite of `systemExempted` and asks for exact-alarm permissions; don't add those.
 - **AGP 9 Kotlin**: built-in Kotlin is disabled (`android.builtInKotlin=false`) because all modules are Java. Re-enable it only if Kotlin sources are added.
 - **Rust lints**: `unwrap`, `expect`, `panic` and indexing/slicing are `deny`; use `get()` and `Result`. Tests opt out with `#[allow]`.

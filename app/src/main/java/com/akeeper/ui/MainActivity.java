@@ -1,6 +1,8 @@
 package com.akeeper.ui;
 
 import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -11,6 +13,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
+import android.widget.Toast;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -28,6 +31,7 @@ import com.akeeper.vpn.ShieldStatus;
 import com.akeeper.vpn.ShieldVpnService;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 
 import java.io.File;
@@ -84,6 +88,9 @@ public final class MainActivity extends AppCompatActivity {
         }
     };
     private ShieldStatus.Subscription subscription;
+    // Tant qu'un rapport de plantage n'est pas acquitté, le service n'est pas relancé : il pourrait replanter aussitôt.
+    private boolean crashDialogShown;
+    private boolean crashPending;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -117,8 +124,9 @@ public final class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        showPendingCrash();
         // Relance idempotente : le service republie l'état du verrouillage, modifié peut-être dans les réglages.
-        if (hasVpnConsent()) {
+        if (hasVpnConsent() && !crashPending) {
             ShieldVpnService.start(this);
         }
         render();
@@ -138,6 +146,36 @@ public final class MainActivity extends AppCompatActivity {
         // Force la reconstruction de l'écran au retour : les écrans Apps et Réglages viennent d'être libérés.
         shownLayout = 0;
         super.onStop();
+    }
+
+    private void showPendingCrash() {
+        if (crashDialogShown) {
+            return;
+        }
+        var report = CrashReport.pending(this);
+        crashPending = report.isPresent();
+        if (report.isEmpty()) {
+            return;
+        }
+        crashDialogShown = true;
+        var text = report.get().text();
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.crash_title)
+                .setMessage(getString(R.string.crash_intro) + "\n\n" + text)
+                .setPositiveButton(R.string.crash_copy, (d, w) -> {
+                    getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("aKeeper", text));
+                    Toast.makeText(this, R.string.crash_copied, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(R.string.action_close, null)
+                .setOnDismissListener(d -> {
+                    CrashReport.acknowledge(this, report.get());
+                    crashPending = false;
+                    if (hasVpnConsent()) {
+                        ShieldVpnService.start(this);
+                    }
+                    render();
+                })
+                .show();
     }
 
     private void render() {

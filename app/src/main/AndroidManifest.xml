@@ -8,6 +8,7 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <application
+        android:name=".AKeeperApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
