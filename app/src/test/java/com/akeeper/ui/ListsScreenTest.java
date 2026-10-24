@@ -93,9 +93,10 @@ public class ListsScreenTest {
     public void showsTheDnsBypassWithoutASwitchAndGreysOutAbsentCategories() throws Exception {
         open();
         ViewGroup categories = root.findViewById(R.id.lists_categories);
-        // Trois catégories et le contournement DNS ; ce dernier n'a pas d'interrupteur.
-        assertThat(categories.getChildCount()).isEqualTo(4);
+        // Trois catégories, le contournement DNS et les exclusions par défaut ; ces deux lignes n'ont pas d'interrupteur.
+        assertThat(categories.getChildCount()).isEqualTo(5);
         assertThat(categories.getChildAt(3).findViewById(R.id.row_switch).getVisibility()).isEqualTo(View.GONE);
+        assertThat(categories.getChildAt(4).findViewById(R.id.row_switch).getVisibility()).isEqualTo(View.GONE);
         // Aucun bundle téléchargé dans ce test : la liste intégrée ne porte que la publicité, pas encore les autres.
         awaitUi(() -> !categories.getChildAt(1).findViewById(R.id.row_switch).isEnabled()
                 && categories.getChildAt(1).findViewById(R.id.row_subtitle) != null

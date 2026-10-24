@@ -62,6 +62,7 @@ final class ListsScreen implements AutoCloseable {
         addCategory(categories, RuleCategory.PHISHING, R.string.category_phishing, R.string.category_phishing_sub);
         addCategory(categories, RuleCategory.MALWARE, R.string.category_malware, R.string.category_malware_sub);
         addBypassRow(categories);
+        addDefaultExclusionsRow(categories);
 
         bindDomains(root.findViewById(R.id.lists_allowed), UserLists.Kind.ALLOWED);
         bindDomains(root.findViewById(R.id.lists_blocked), UserLists.Kind.BLOCKED);
@@ -85,6 +86,15 @@ final class ListsScreen implements AutoCloseable {
         ((TextView) row.findViewById(R.id.row_title)).setText(R.string.lists_bypass_title);
         ((TextView) row.findViewById(R.id.row_subtitle)).setText(R.string.lists_bypass_sub);
         // Sans interrupteur : le désactiver viderait les autres règles de leur sens (docs/ui-ecrans.md, R2).
+        row.findViewById(R.id.row_switch).setVisibility(View.GONE);
+        parent.addView(row);
+    }
+
+    private void addDefaultExclusionsRow(ViewGroup parent) {
+        var row = activity.getLayoutInflater().inflate(R.layout.item_switch_row, parent, false);
+        ((TextView) row.findViewById(R.id.row_title)).setText(R.string.lists_default_title);
+        ((TextView) row.findViewById(R.id.row_subtitle)).setText(R.string.lists_default_sub);
+        // Sans interrupteur : une exclusion par défaut se contourne par une règle personnelle, pas en la désactivant.
         row.findViewById(R.id.row_switch).setVisibility(View.GONE);
         parent.addView(row);
     }

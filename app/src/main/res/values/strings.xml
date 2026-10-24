@@ -140,6 +140,8 @@
     <string name="category_prefs_unavailable">Réglage indisponible sur cet appareil</string>
     <string name="lists_bypass_title">Contournement DNS</string>
     <string name="lists_bypass_sub">Toujours actif · empêche les apps d\'échapper au filtrage</string>
+    <string name="lists_default_title">Exclusions par défaut</string>
+    <string name="lists_default_sub">Détection de connexion, notifications push, heure et certificats : jamais bloqués par les listes. Une règle personnelle reste prioritaire.</string>
     <string name="lists_allowed_title">Exceptions personnelles</string>
     <string name="lists_allowed_hint">Domaines toujours autorisés, même s\'ils figurent dans une liste. Le contournement DNS ne peut pas être autorisé.</string>
     <string name="lists_blocked_title">Domaines bloqués personnels</string>

@@ -1,0 +1,30 @@
+# Exclusions par défaut du filtrage : ces noms (sous-domaines compris) ne sont jamais bloqués par les catégories,
+# même si une liste les contient. Seuls la liste personnelle de l'utilisateur et le contournement DNS (DoH)
+# l'emportent. Gardez cette liste courte : uniquement ce dont dépend la connexion du téléphone.
+# Détection de connexion et portails captifs
+connectivitycheck.gstatic.com
+connectivitycheck.android.com
+clients3.google.com
+clients4.google.com
+android.clients.google.com
+msftconnecttest.com
+dns.msftncsi.com
+captive.apple.com
+detectportal.firefox.com
+connectivity-check.ubuntu.com
+nmcheck.gnome.org
+# Notifications push
+mtalk.google.com
+fcm.googleapis.com
+firebaseinstallations.googleapis.com
+push.apple.com
+# Heure et mises à jour système
+time.android.com
+time.google.com
+update.googleapis.com
+play.googleapis.com
+# Révocation de certificats (OCSP)
+ocsp.pki.goog
+ocsp.digicert.com
+ocsp.sectigo.com
+r3.o.lencr.org
