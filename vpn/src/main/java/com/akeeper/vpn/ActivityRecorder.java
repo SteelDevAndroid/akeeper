@@ -56,6 +56,7 @@ final class ActivityRecorder implements AutoCloseable {
             var events = engine.drainEvents();
             log.insert(events);
             long now = System.currentTimeMillis();
+            log.addTraffic(engine.drainTraffic(), now);
             if (now - lastPurge >= PURGE_SECONDS * 1000) {
                 lastPurge = now;
                 log.purgeOlderThan(now - TimeUnit.DAYS.toMillis(prefs.settings().retentionDays()));

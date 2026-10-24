@@ -77,6 +77,13 @@ final class EventText {
         return context.getString(R.string.reason_list_unknown);
     }
 
+    /** Titre d'un groupe : « 14 h », précédé du jour s'il n'est pas aujourd'hui. */
+    static String hour(long hourStartMillis) {
+        var start = Instant.ofEpochMilli(hourStartMillis).atZone(ZoneId.systemDefault());
+        var sameDay = start.toLocalDate().equals(java.time.LocalDate.now());
+        return DateTimeFormatter.ofPattern(sameDay ? "HH 'h'" : "EEE d MMM · HH 'h'").format(start);
+    }
+
     static String time(long millis) {
         return TIME.format(Instant.ofEpochMilli(millis));
     }

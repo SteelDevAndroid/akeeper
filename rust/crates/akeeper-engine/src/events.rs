@@ -1,7 +1,7 @@
 //! Journal d'activité du moteur : événements bornés, regroupés quand ils se répètent, vidés par Java toutes les
 //! secondes. Le moteur ne garde rien d'autre : l'historique vit dans la base chiffrée côté Java.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,6 +12,8 @@ pub const MAX_EVENTS: usize = 4096;
 const COALESCE_WINDOW_MS: u64 = 10_000;
 const COALESCE_SCAN: usize = 64;
 const MAX_NAME: usize = 253;
+/// Apps distinctes suivies pour le volume ; au-delà, les nouvelles sont ignorées jusqu'au prochain vidage.
+const MAX_TRAFFIC_UIDS: usize = 4096;
 /// Code de raison d'un refus par le pare-feu par app (les autres viennent de `Reason::code`).
 pub const REASON_APP: u8 = 3;
 
@@ -44,14 +46,21 @@ pub struct Event {
 pub struct EventLog {
     enabled: AtomicBool,
     queue: Mutex<VecDeque<Event>>,
+    /// Octets (émis, reçus) par UID depuis le dernier vidage ; clé `u32::MAX` pour un propriétaire inconnu.
+    traffic: Mutex<HashMap<u32, (u64, u64)>>,
 }
 
 impl EventLog {
     /// Désactivé, le journal ne stocke rien et les appelants n'ont pas à chercher le propriétaire d'un flux.
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
-        if !enabled && let Ok(mut queue) = self.queue.lock() {
-            queue.clear();
+        if !enabled {
+            if let Ok(mut queue) = self.queue.lock() {
+                queue.clear();
+            }
+            if let Ok(mut traffic) = self.traffic.lock() {
+                traffic.clear();
+            }
         }
     }
 
@@ -94,6 +103,35 @@ impl EventLog {
         });
     }
 
+    /// Octets relayés pour une app : `up` vers le serveur, `down` vers l'app. Rien n'est compté journal coupé.
+    pub fn traffic(&self, uid: Option<u32>, up: usize, down: usize) {
+        if !self.enabled() {
+            return;
+        }
+        let Ok(mut traffic) = self.traffic.lock() else {
+            return;
+        };
+        let key = uid.unwrap_or(u32::MAX);
+        if traffic.len() >= MAX_TRAFFIC_UIDS && !traffic.contains_key(&key) {
+            return;
+        }
+        let entry = traffic.entry(key).or_default();
+        entry.0 = entry.0.saturating_add(up as u64);
+        entry.1 = entry.1.saturating_add(down as u64);
+    }
+
+    pub fn drain_traffic(&self) -> Vec<(Option<u32>, u64, u64)> {
+        self.traffic
+            .lock()
+            .map(|mut traffic| {
+                traffic
+                    .drain()
+                    .map(|(uid, (up, down))| ((uid != u32::MAX).then_some(uid), up, down))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn drain(&self) -> Vec<Event> {
         self.queue
             .lock()
@@ -123,6 +161,18 @@ pub fn encode(events: &[Event]) -> Vec<u8> {
         let len = u16::try_from(name.len()).unwrap_or(u16::MAX);
         out.extend_from_slice(&len.to_be_bytes());
         out.extend_from_slice(name.get(..usize::from(len)).unwrap_or_default());
+    }
+    out
+}
+
+/// Volumes transmis à Java, gros-boutiste : `uid i32 (-1 inconnu) · up u64 · down u64` par app, mis bout à bout.
+pub fn encode_traffic(entries: &[(Option<u32>, u64, u64)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for &(uid, up, down) in entries {
+        let uid = uid.and_then(|u| i32::try_from(u).ok()).unwrap_or(-1);
+        out.extend_from_slice(&uid.to_be_bytes());
+        out.extend_from_slice(&up.to_be_bytes());
+        out.extend_from_slice(&down.to_be_bytes());
     }
     out
 }
@@ -176,6 +226,28 @@ mod tests {
         let events = log.drain();
         assert_eq!(events.len(), MAX_EVENTS);
         assert_eq!(events[0].name, "host10.example");
+    }
+
+    #[test]
+    fn sums_traffic_per_app_only_while_enabled() {
+        let log = EventLog::default();
+        log.traffic(Some(10_001), 100, 0);
+        assert!(log.drain_traffic().is_empty());
+
+        log.set_enabled(true);
+        log.traffic(Some(10_001), 100, 0);
+        log.traffic(Some(10_001), 5, 900);
+        log.traffic(None, 1, 2);
+        let mut entries = log.drain_traffic();
+        entries.sort();
+        assert_eq!(entries, vec![(None, 1, 2), (Some(10_001), 105, 900)]);
+        assert!(log.drain_traffic().is_empty());
+
+        let bytes = encode_traffic(&[(Some(7), 1, 2), (None, 3, 4)]);
+        assert_eq!(bytes.len(), 40);
+        assert_eq!(&bytes[..4], &7i32.to_be_bytes());
+        assert_eq!(&bytes[20..24], &(-1i32).to_be_bytes());
+        assert_eq!(u64::from_be_bytes(bytes[32..40].try_into().unwrap()), 4);
     }
 
     #[test]

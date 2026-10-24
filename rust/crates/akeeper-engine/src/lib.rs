@@ -180,6 +180,11 @@ impl Engine {
         events::encode(&self.events.drain())
     }
 
+    /// Volumes par app depuis le dernier appel, au format de `events::encode_traffic`.
+    pub fn drain_traffic(&self) -> Vec<u8> {
+        events::encode_traffic(&self.events.drain_traffic())
+    }
+
     pub fn stats(&self) -> &Stats {
         &self.stats
     }

@@ -1,6 +1,7 @@
 package com.akeeper.ui;
 
 import android.content.pm.PackageManager;
+import android.text.format.Formatter;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -19,12 +20,13 @@ import java.security.GeneralSecurityException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
- * Détail d'une app (A3) : accès Internet, UID partagé et activité récente de l'UID. Hors MVP, comme le précise la
- * spec : volumes de données et règles distinctes Wi-Fi / mobile.
+ * Détail d'une app (A3) : accès Internet, UID partagé et activité récente de l'UID. Les règles distinctes
+ * Wi-Fi / mobile sont hors MVP, comme le précise la spec.
  */
 final class AppSheet {
 
@@ -67,7 +69,7 @@ final class AppSheet {
 
         RecyclerView events = view.findViewById(R.id.sheet_app_events);
         events.setLayoutManager(new LinearLayoutManager(activity));
-        var adapter = new EventAdapter(text, false, event -> EventSheet.show(activity, anchor, text, event, worker));
+        var adapter = new EventAdapter(text, false, false, event -> EventSheet.show(activity, anchor, text, event, worker));
         events.setAdapter(adapter);
         dialog.setContentView(view);
         dialog.show();
@@ -82,7 +84,27 @@ final class AppSheet {
                     loaded = List.of();
                 }
                 var shown = loaded;
+                long now = System.currentTimeMillis();
+                String volume = null;
+                try {
+                    var log = ActivityLog.get(activity);
+                    long[] day = log.traffic(app.uid(), now - TimeUnit.DAYS.toMillis(1));
+                    long[] week = log.traffic(app.uid(), now - TimeUnit.DAYS.toMillis(7));
+                    if (week[0] + week[1] > 0) {
+                        volume = activity.getString(R.string.app_detail_volume,
+                                Formatter.formatShortFileSize(activity, day[0]),
+                                Formatter.formatShortFileSize(activity, day[1]),
+                                Formatter.formatShortFileSize(activity, week[0]),
+                                Formatter.formatShortFileSize(activity, week[1]));
+                    }
+                } catch (GeneralSecurityException | IOException | RuntimeException unavailable) {
+                    // Volumes indisponibles : le texte par défaut reste.
+                }
+                var shownVolume = volume;
                 activity.runOnUiThread(() -> {
+                    if (shownVolume != null) {
+                        ((TextView) view.findViewById(R.id.sheet_app_volume)).setText(shownVolume);
+                    }
                     adapter.submit(shown);
                     view.findViewById(R.id.sheet_app_empty).setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
                 });

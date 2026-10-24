@@ -24,6 +24,16 @@ class AppPrefsTest {
         assertThat(settings.disabledCategories()).isEmpty();
         assertThat(settings.logEnabled()).isTrue();
         assertThat(settings.retentionDays()).isEqualTo(7);
+        assertThat(settings.lanBypass()).as("le réseau local est filtré par défaut").isFalse();
+    }
+
+    @Test
+    void persistsTheLanOptionAndTreatsGarbageAsOff() throws Exception {
+        var file = new File(dir, "prefs.bin");
+        new AppPrefs(file, new FakeAead()).update(s -> s.withLanBypass(true));
+
+        assertThat(new AppPrefs(file, new FakeAead()).settings().lanBypass()).isTrue();
+        assertThat(AppPrefs.decode("lan=oui\n".getBytes(StandardCharsets.UTF_8)).lanBypass()).isFalse();
     }
 
     @Test

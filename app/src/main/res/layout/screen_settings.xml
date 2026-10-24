@@ -89,6 +89,22 @@
 
             <TextView
                 style="@style/Widget.AKeeper.SectionTitle"
+                android:text="@string/settings_section_network" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.AKeeper.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:id="@+id/settings_network"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                style="@style/Widget.AKeeper.SectionTitle"
                 android:text="@string/settings_section_privacy" />
 
             <com.google.android.material.card.MaterialCardView

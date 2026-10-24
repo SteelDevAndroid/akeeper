@@ -168,7 +168,7 @@ Cet écran n'est affiché que si `Build.MANUFACTURER` fait partie des OEM du gui
 - Section **Activité récente** : domaines contactés, avec un compteur et le verdict par domaine. Toucher un domaine ouvre A5.
 - Section **Données** : volume sur 24 h et 7 jours.
 - Hors MVP : règles distinctes Wi-Fi / données mobiles.
-- Livré sans la section Données : le moteur ne compte pas les octets par UID.
+- Section Données livrée : volumes 24 h et 7 jours, comptés par le moteur journal actif.
 
 ### A4 — Activité
 
@@ -178,7 +178,7 @@ Cet écran n'est affiché que si `Build.MANUFACTURER` fait partie des OEM du gui
 - Pied de liste : « Historique conservé 7 jours sur cet appareil ».
 - Si le journal est désactivé (R1), l'état vide affiche « Journal désactivé » avec le bouton **Activer**.
 
-Livré avec écarts : pas de groupement par heure ni de sélecteur d'app (la fiche A3 filtre par app), et un résumé « bloqués depuis minuit » sous les filtres.
+Livré : groupement par heure, sélecteur d'app et un résumé « bloqués depuis minuit » sous les filtres.
 
 ### A5 — Détail événement (bottom sheet)
 

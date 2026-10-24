@@ -122,6 +122,11 @@ public final class NativeEngine implements AutoCloseable {
         return handle == 0 ? List.of() : FlowEvent.parse(nativeDrainEvents(handle));
     }
 
+    /** Volumes par app depuis le dernier appel ; comptés seulement journal actif. */
+    public synchronized List<TrafficSample> drainTraffic() {
+        return handle == 0 ? List.of() : TrafficSample.parse(nativeDrainTraffic(handle));
+    }
+
     /** Renvoie -1 une fois le moteur arrêté. */
     public synchronized long counter(Counter counter) {
         return handle == 0 ? -1 : nativeCounter(handle, counter.ordinal());
@@ -158,6 +163,8 @@ public final class NativeEngine implements AutoCloseable {
     private static native int nativeSetLogging(long handle, int enabled);
 
     private static native byte[] nativeDrainEvents(long handle);
+
+    private static native byte[] nativeDrainTraffic(long handle);
 
     private static native long nativeCounter(long handle, int counter);
 

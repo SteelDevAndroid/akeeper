@@ -158,6 +158,8 @@
     <string name="activity_scope_blocked">Bloqués</string>
     <string name="activity_scope_allowed">Autorisés</string>
     <string name="activity_scope_all">Tous</string>
+    <string name="activity_all_apps">Toutes les apps</string>
+    <string name="activity_app_picker">Filtrer par app</string>
     <string name="activity_search_hint">Rechercher un domaine</string>
     <string name="activity_empty">Rien à afficher pour l\'instant</string>
     <string name="activity_disabled">Journal désactivé</string>
@@ -188,8 +190,18 @@
     <string name="event_save_failed">Enregistrement impossible</string>
     <string name="app_detail_internet">Accès Internet</string>
     <string name="app_detail_shared">Cette app partage son accès réseau avec : %1$s. La règle s\'applique à toutes.</string>
+    <string name="app_detail_data">Données</string>
+    <string name="app_detail_volume_none">Aucun volume enregistré</string>
+    <string name="app_detail_volume">24 h : %1$s envoyés, %2$s reçus\n7 jours : %3$s envoyés, %4$s reçus</string>
     <string name="app_detail_recent">Activité récente</string>
     <string name="app_detail_empty">Aucune activité enregistrée</string>
+    <string name="settings_section_network">Réseau</string>
+    <string name="settings_lan_title">Ne pas filtrer le réseau local</string>
+    <string name="settings_lan_subtitle">Imprimante, Chromecast, NAS : ces appareils restent joignables</string>
+    <string name="settings_lan_locked">Indisponible : la Protection avancée d\'Android est active</string>
+    <string name="settings_lan_warning_title">Désactiver le filtrage du réseau local ?</string>
+    <string name="settings_lan_warning_body">Les apps pourront envoyer des données aux appareils de votre réseau sans filtrage.</string>
+    <string name="settings_lan_confirm">Désactiver le filtrage</string>
     <string name="settings_section_privacy">Vie privée</string>
     <string name="settings_log_title">Journal d\'activité</string>
     <string name="settings_log_subtitle">Domaines contactés, gardés chiffrés sur cet appareil</string>

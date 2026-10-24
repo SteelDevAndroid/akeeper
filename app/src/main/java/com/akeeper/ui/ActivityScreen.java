@@ -49,6 +49,7 @@ final class ActivityScreen implements AutoCloseable {
     private final Runnable tick = this::reload;
     private Scope scope = Scope.BLOCKED;
     private String query = "";
+    private int uidFilter = ActivityLog.Query.ANY_UID;
     private boolean closed;
     // Valeurs lues sur le thread de travail, affichées sur le principal.
     private volatile AppPrefs prefs;
@@ -57,7 +58,7 @@ final class ActivityScreen implements AutoCloseable {
         this.activity = activity;
         this.root = root;
         this.text = new EventText(activity);
-        this.adapter = new EventAdapter(text, true, event -> EventSheet.show(activity, root, text, event, worker));
+        this.adapter = new EventAdapter(text, true, true, event -> EventSheet.show(activity, root, text, event, worker));
 
         RecyclerView list = root.findViewById(R.id.activity_list);
         list.setLayoutManager(new LinearLayoutManager(activity));
@@ -86,6 +87,7 @@ final class ActivityScreen implements AutoCloseable {
                 reload();
             }
         });
+        root.findViewById(R.id.activity_app_chip).setOnClickListener(v -> pickApp());
         root.findViewById(R.id.activity_enable).setOnClickListener(v -> setLogEnabled());
         reload();
     }
@@ -97,14 +99,15 @@ final class ActivityScreen implements AutoCloseable {
         }
         var wanted = scope;
         var needle = query;
+        int uid = uidFilter;
         try {
-            worker.execute(() -> load(wanted, needle));
+            worker.execute(() -> load(wanted, needle, uid));
         } catch (RejectedExecutionException closedWhileQueued) {
             // Écran fermé entre-temps.
         }
     }
 
-    private void load(Scope wanted, String needle) {
+    private void load(Scope wanted, String needle, int uid) {
         AppPrefs loaded = prefs;
         try {
             if (loaded == null) {
@@ -112,7 +115,7 @@ final class ActivityScreen implements AutoCloseable {
                 prefs = loaded;
             }
             var log = ActivityLog.get(activity);
-            var events = log.query(new ActivityLog.Query(wanted == Scope.BLOCKED, ActivityLog.Query.ANY_UID, LIMIT))
+            var events = log.query(new ActivityLog.Query(wanted == Scope.BLOCKED, uid, LIMIT))
                     .stream()
                     .filter(e -> wanted != Scope.ALLOWED || !e.blocked())
                     .filter(e -> needle.isEmpty() || e.name().toLowerCase(Locale.ROOT).contains(needle))
@@ -146,6 +149,50 @@ final class ActivityScreen implements AutoCloseable {
         ((TextView) root.findViewById(R.id.activity_footer)).setText(
                 activity.getString(R.string.activity_footer, settings.retentionDays()));
         handler.postDelayed(tick, REFRESH_MS);
+    }
+
+    /** Liste les apps présentes dans le journal ; les libellés sont résolus hors du thread principal. */
+    private void pickApp() {
+        try {
+            worker.execute(() -> {
+                List<Integer> uids;
+                try {
+                    uids = ActivityLog.get(activity).uids();
+                } catch (GeneralSecurityException | IOException | RuntimeException unavailable) {
+                    return;
+                }
+                var sorted = uids.stream().sorted(java.util.Comparator.comparing(text::app)).toList();
+                activity.runOnUiThread(() -> showAppPicker(sorted));
+            });
+        } catch (RejectedExecutionException closedWhileQueued) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void showAppPicker(List<Integer> uids) {
+        if (closed) {
+            return;
+        }
+        var labels = new String[uids.size() + 1];
+        labels[0] = activity.getString(R.string.activity_all_apps);
+        int checked = 0;
+        for (int i = 0; i < uids.size(); i++) {
+            labels[i + 1] = text.app(uids.get(i));
+            if (uids.get(i) == uidFilter) {
+                checked = i + 1;
+            }
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.activity_app_picker)
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    dialog.dismiss();
+                    uidFilter = which == 0 ? ActivityLog.Query.ANY_UID : uids.get(which - 1);
+                    ((com.google.android.material.chip.Chip) root.findViewById(R.id.activity_app_chip))
+                            .setText(labels[which]);
+                    reload();
+                })
+                .setNegativeButton(R.string.action_cancel, null)
+                .show();
     }
 
     private void setLogEnabled() {

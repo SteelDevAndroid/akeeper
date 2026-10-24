@@ -392,6 +392,7 @@ fn pump(
         while flow.writable && !flow.to_upstream.is_empty() {
             match flow.upstream.write(&flow.to_upstream) {
                 Ok(n) => {
+                    events.traffic(flow.uid, n, 0);
                     flow.to_upstream.drain(..n);
                     refill_from_app(flow, socket, scratch);
                 }
@@ -419,6 +420,7 @@ fn pump(
             }
             match socket.send_slice(&flow.to_client) {
                 Ok(n) if n > 0 => {
+                    events.traffic(flow.uid, 0, n);
                     flow.to_client.drain(..n);
                 }
                 _ => break,

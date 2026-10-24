@@ -4,6 +4,7 @@ import android.content.ContentValues;
 import android.content.Context;
 
 import com.akeeper.engine.FlowEvent;
+import com.akeeper.engine.TrafficSample;
 
 import net.zetetic.database.sqlcipher.SQLiteDatabase;
 import net.zetetic.database.sqlcipher.SQLiteOpenHelper;
@@ -30,7 +31,9 @@ public final class ActivityLog {
     }
 
     private static final String DATABASE = "activity.db";
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
+    private static final String TRAFFIC = "traffic";
+    private static final long HOUR = 3_600_000L;
     private static final String TABLE = "events";
 
     private static volatile ActivityLog instance;
@@ -130,6 +133,17 @@ public final class ActivityLog {
         return events;
     }
 
+    /** UID des apps présentes dans le journal. */
+    public List<Integer> uids() {
+        var uids = new ArrayList<Integer>();
+        try (var cursor = helper.getReadableDatabase().rawQuery("SELECT DISTINCT uid FROM " + TABLE, null)) {
+            while (cursor.moveToNext()) {
+                uids.add(cursor.getInt(0));
+            }
+        }
+        return uids;
+    }
+
     /** Requêtes et connexions refusées depuis {@code sinceMillis}, doublons regroupés comptés. */
     public long blockedSince(long sinceMillis) {
         try (var cursor = helper.getReadableDatabase().rawQuery(
@@ -139,12 +153,47 @@ public final class ActivityLog {
         }
     }
 
+    /** Cumule les volumes dans le seau horaire de {@code nowMillis} : une ligne par (app, heure). */
+    public void addTraffic(List<TrafficSample> samples, long nowMillis) {
+        if (samples.isEmpty()) {
+            return;
+        }
+        long hour = nowMillis / HOUR * HOUR;
+        var db = helper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (var sample : samples) {
+                db.execSQL("INSERT INTO " + TRAFFIC + " (uid, hour, sent, received) VALUES (?, ?, ?, ?)"
+                                + " ON CONFLICT(uid, hour) DO UPDATE SET sent = sent + excluded.sent,"
+                                + " received = received + excluded.received",
+                        new Object[]{sample.uid(), hour, sample.sent(), sample.received()});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** Octets {envoyés, reçus} par l'UID depuis {@code sinceMillis}, à l'heure près. */
+    public long[] traffic(int uid, long sinceMillis) {
+        try (var cursor = helper.getReadableDatabase().rawQuery(
+                "SELECT COALESCE(SUM(sent), 0), COALESCE(SUM(received), 0) FROM " + TRAFFIC
+                        + " WHERE uid = ? AND hour >= ?",
+                new String[]{Integer.toString(uid), Long.toString(sinceMillis / HOUR * HOUR)})) {
+            return cursor.moveToFirst() ? new long[]{cursor.getLong(0), cursor.getLong(1)} : new long[2];
+        }
+    }
+
     public void purgeOlderThan(long cutoffMillis) {
-        helper.getWritableDatabase().delete(TABLE, "ts < ?", new String[]{Long.toString(cutoffMillis)});
+        var db = helper.getWritableDatabase();
+        db.delete(TABLE, "ts < ?", new String[]{Long.toString(cutoffMillis)});
+        db.delete(TRAFFIC, "hour < ?", new String[]{Long.toString(cutoffMillis / HOUR * HOUR)});
     }
 
     public void clear() {
-        helper.getWritableDatabase().delete(TABLE, null, null);
+        var db = helper.getWritableDatabase();
+        db.delete(TABLE, null, null);
+        db.delete(TRAFFIC, null, null);
     }
 
     private static final class Helper extends SQLiteOpenHelper {
@@ -161,11 +210,19 @@ public final class ActivityLog {
                     + " count INTEGER NOT NULL)");
             db.execSQL("CREATE INDEX events_ts ON " + TABLE + " (ts)");
             db.execSQL("CREATE INDEX events_uid ON " + TABLE + " (uid, ts)");
+            createTraffic(db);
+        }
+
+        private static void createTraffic(SQLiteDatabase db) {
+            db.execSQL("CREATE TABLE " + TRAFFIC + " (uid INTEGER NOT NULL, hour INTEGER NOT NULL,"
+                    + " sent INTEGER NOT NULL, received INTEGER NOT NULL, PRIMARY KEY (uid, hour))");
         }
 
         @Override
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            // Version 1 : rien à migrer.
+            if (oldVersion < 2) {
+                createTraffic(db);
+            }
         }
     }
 }

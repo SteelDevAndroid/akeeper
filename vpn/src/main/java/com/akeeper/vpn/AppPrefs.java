@@ -30,9 +30,11 @@ public final class AppPrefs {
      * @param disabledCategories catégories de domaines désactivées dans R2
      * @param logEnabled         journal d'activité (R1)
      * @param retentionDays      durée de conservation du journal, l'une de {@link #RETENTION_CHOICES}
+     * @param lanBypass          réseau local hors du tunnel (R1) ; sans effet sous Protection avancée
      */
-    public record Settings(Set<RuleCategory> disabledCategories, boolean logEnabled, int retentionDays) {
-        public static final Settings DEFAULT = new Settings(Set.of(), true, 7);
+    public record Settings(Set<RuleCategory> disabledCategories, boolean logEnabled, int retentionDays,
+                           boolean lanBypass) {
+        public static final Settings DEFAULT = new Settings(Set.of(), true, 7, false);
 
         public Settings {
             disabledCategories = Set.copyOf(disabledCategories);
@@ -46,15 +48,19 @@ public final class AppPrefs {
             } else {
                 next.add(category);
             }
-            return new Settings(next, logEnabled, retentionDays);
+            return new Settings(next, logEnabled, retentionDays, lanBypass);
         }
 
         public Settings withLogEnabled(boolean enabled) {
-            return new Settings(disabledCategories, enabled, retentionDays);
+            return new Settings(disabledCategories, enabled, retentionDays, lanBypass);
         }
 
         public Settings withRetentionDays(int days) {
-            return new Settings(disabledCategories, logEnabled, days);
+            return new Settings(disabledCategories, logEnabled, days, lanBypass);
+        }
+
+        public Settings withLanBypass(boolean enabled) {
+            return new Settings(disabledCategories, logEnabled, retentionDays, enabled);
         }
     }
 
@@ -114,6 +120,7 @@ public final class AppPrefs {
         properties.setProperty("disabled", String.join(",", settings.disabledCategories().stream().map(Enum::name).sorted().toList()));
         properties.setProperty("log", Boolean.toString(settings.logEnabled()));
         properties.setProperty("retention", Integer.toString(settings.retentionDays()));
+        properties.setProperty("lan", Boolean.toString(settings.lanBypass()));
         var out = new ByteArrayOutputStream();
         properties.store(out, null);
         return out.toByteArray();
@@ -135,7 +142,7 @@ public final class AppPrefs {
             }
         }
         return new Settings(disabled, !"false".equals(properties.getProperty("log")),
-                retention(properties.getProperty("retention")));
+                retention(properties.getProperty("retention")), "true".equals(properties.getProperty("lan")));
     }
 
     private static int retention(String value) {

@@ -97,7 +97,9 @@ impl UdpNat {
         if let Some(flow) = self.flows.get_mut(&token) {
             flow.last_active = now;
             // Tampon d'émission plein : perte assumée, comme sur un vrai lien UDP.
-            let _ = flow.socket.send(datagram.payload);
+            if flow.socket.send(datagram.payload).is_ok() {
+                self.events.traffic(flow.uid, datagram.payload.len(), 0);
+            }
         }
         Sent::Relayed
     }
@@ -168,6 +170,7 @@ impl UdpNat {
                 Ok(n) => {
                     flow.last_active = now;
                     if let Some(payload) = buf.get(..n) {
+                        self.events.traffic(flow.uid, 0, n);
                         deliver(flow.remote, flow.client, payload);
                     }
                 }

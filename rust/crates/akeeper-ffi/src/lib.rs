@@ -238,6 +238,24 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeDrainEv
         .unwrap_or_else(|| JByteArray::from(JObject::null()))
 }
 
+/// Vide les volumes par app (format de `akeeper_engine::events::encode_traffic`), `null` en cas d'échec.
+///
+/// # Safety
+/// `handle` vient de `nativeStart` et n'a pas encore été passé à `nativeStop` (garanti par le verrou Java).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeDrainTraffic<'local>(
+    env: JNIEnv<'local>,
+    _class: JniClass<'local>,
+    handle: JLong,
+) -> JByteArray<'local> {
+    // SAFETY: contrat de la fonction ; lecture seule via &Engine.
+    let traffic = unsafe { (handle as *const Engine).as_ref() }
+        .and_then(|engine| catch_unwind(AssertUnwindSafe(|| engine.drain_traffic())).ok());
+    traffic
+        .and_then(|bytes| env.byte_array_from_slice(&bytes).ok())
+        .unwrap_or_else(|| JByteArray::from(JObject::null()))
+}
+
 fn owned(fd: JInt) -> Option<OwnedFd> {
     // SAFETY: Java a appelé ParcelFileDescriptor.detachFd() : un fd positif est ouvert et n'a plus d'autre propriétaire.
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })

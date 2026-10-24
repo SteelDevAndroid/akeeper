@@ -139,6 +139,13 @@ class NativeEngineJniTest {
     }
 
     @Test
+    void drainsTrafficOnlyWhileLoggingIsOn() {
+        assertThat(engine.drainTraffic()).isEmpty();
+        assertThat(engine.setLogging(true)).isTrue();
+        assertThat(engine.drainTraffic()).isEmpty();
+    }
+
+    @Test
     void pausesAndResumesTheFiltering() {
         assertThat(engine.pause(60_000)).isTrue();
         assertThat(engine.pause(0)).as("une durée nulle n'est pas une pause").isFalse();
@@ -154,6 +161,7 @@ class NativeEngineJniTest {
         assertThat(engine.setBlockedUids(new int[0])).isFalse();
         assertThat(engine.setLogging(true)).isFalse();
         assertThat(engine.drainEvents()).isEmpty();
+        assertThat(engine.drainTraffic()).isEmpty();
         engine.close();
     }
 

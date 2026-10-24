@@ -16,6 +16,7 @@ import com.akeeper.R;
 import com.akeeper.rules.RuleBundle;
 import com.akeeper.rules.RuleStore;
 import com.akeeper.rules.RuleUpdates;
+import com.akeeper.security.AdvancedProtectionPolicy;
 import com.akeeper.vpn.ActivityLog;
 import com.akeeper.vpn.AppPrefs;
 import com.akeeper.vpn.ShieldStatus;
@@ -83,6 +84,7 @@ final class SettingsScreen implements AutoCloseable {
             row.setOnClickListener(v -> showBatteryGuide(guide));
         });
 
+        bindNetwork(root.findViewById(R.id.settings_network), root);
         bindPrivacy(root.findViewById(R.id.settings_privacy), root);
 
         ViewGroup about = root.findViewById(R.id.settings_about);
@@ -95,6 +97,69 @@ final class SettingsScreen implements AutoCloseable {
         // L'activation d'un bundle arrive sur le thread de WorkManager.
         ruleChanges = rules.observe(this::refreshRules);
         refresh();
+    }
+
+    /**
+     * Réseau local hors du tunnel. Désactivé par défaut, et verrouillé sous Protection avancée. Activer l'option demande
+     * une confirmation ; le service reconstruit alors le tunnel (les routes d'un VPN sont fixées à l'établissement).
+     */
+    private void bindNetwork(ViewGroup network, View root) {
+        var row = activity.getLayoutInflater().inflate(R.layout.item_switch_row, network, false);
+        ((TextView) row.findViewById(R.id.row_title)).setText(R.string.settings_lan_title);
+        var subtitle = (TextView) row.findViewById(R.id.row_subtitle);
+        subtitle.setText(R.string.settings_lan_subtitle);
+        MaterialSwitch toggle = row.findViewById(R.id.row_switch);
+        toggle.setEnabled(false);
+        network.addView(row);
+        try {
+            worker.execute(() -> {
+                AppPrefs loaded;
+                try {
+                    loaded = AppPrefs.get(activity);
+                } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+                    loaded = null;
+                }
+                var prefs = loaded;
+                boolean locked = new AdvancedProtectionPolicy(activity).active();
+                activity.runOnUiThread(() -> showNetwork(prefs, locked, toggle, subtitle, root));
+            });
+        } catch (RejectedExecutionException closed) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void showNetwork(AppPrefs prefs, boolean locked, MaterialSwitch toggle, TextView subtitle, View root) {
+        if (prefs == null) {
+            subtitle.setText(R.string.settings_log_unavailable);
+            return;
+        }
+        if (locked) {
+            subtitle.setText(R.string.settings_lan_locked);
+            toggle.setChecked(false);
+            return;
+        }
+        toggle.setChecked(prefs.settings().lanBypass());
+        toggle.setEnabled(true);
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            if (!checked) {
+                save(prefs, root, settings -> settings.withLanBypass(false));
+                return;
+            }
+            // La confirmation précède l'écriture : un refus remet l'interrupteur sans toucher aux préférences.
+            toggle.setOnCheckedChangeListener(null);
+            toggle.setChecked(false);
+            new MaterialAlertDialogBuilder(activity)
+                    .setTitle(R.string.settings_lan_warning_title)
+                    .setMessage(R.string.settings_lan_warning_body)
+                    .setNegativeButton(R.string.action_cancel, null)
+                    .setPositiveButton(R.string.settings_lan_confirm, (d, w) -> {
+                        save(prefs, root, settings -> settings.withLanBypass(true));
+                        showNetwork(prefs, false, toggle, subtitle, root);
+                        toggle.setChecked(true);
+                    })
+                    .setOnDismissListener(d -> showNetwork(prefs, false, toggle, subtitle, root))
+                    .show();
+        });
     }
 
     /** Journal d'activité : interrupteur, durée de conservation et effacement. Le Keystore n'est ouvert que hors UI. */
