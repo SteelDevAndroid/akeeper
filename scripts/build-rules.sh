@@ -39,6 +39,21 @@ count() { grep -cvE '^\s*(#|$)' "$1" || true; }
 
 args=(--ads "$lists/light.txt" --phishing "$lists/phishing.txt"
       --doh "$root/rules/sources/doh-hosts.txt" --doh-ips "$root/rules/sources/doh-ips.txt")
+# Exclusions : fichier versionné, puis liste facultative (ALLOW_LIST_URL, par exemple une liste blanche française).
+cp "$root/rules/sources/default-allow.txt" "$tmp/allow.txt"
+allow_extra=no
+if [ -n "${ALLOW_LIST_URL:-}" ]; then
+    if curl -fsSL --retry 3 --retry-delay 5 --max-time 120 -o "$lists/allow-extra.txt" "$ALLOW_LIST_URL" \
+        && [ "$(count "$lists/allow-extra.txt")" -ge 1 ]; then
+        printf '\n' >> "$tmp/allow.txt"
+        cat "$lists/allow-extra.txt" >> "$tmp/allow.txt"
+        allow_extra=yes
+    else
+        # Une liste blanche en panne ne doit pas empêcher de publier les règles de blocage.
+        echo "ALLOW_LIST_URL illisible : exclusions du dépôt seules" >&2
+    fi
+fi
+args+=(--allow "$tmp/allow.txt")
 malware=no
 if [ -n "${URLHAUS_AUTH_KEY:-}" ]; then
     # La clé fait partie de l'URL : -s sans -v, et --fail pour que curl n'affiche pas l'URL en cas d'erreur.
@@ -61,6 +76,7 @@ fi
     echo "HaGeZi's Multi LIGHT : licence GPL-3.0, https://github.com/hagezi/dns-blocklists"
     echo "Phishing Army : https://phishing.army/ (données de PhishTank, OpenPhish, CERT.PL, Phishunt, urlscan.io, PhishStats, StalkPhish, URLAbuse et AntiPhish.org)"
     [ "$malware" = yes ] && echo "URLhaus (abuse.ch) : https://urlhaus.abuse.ch/, usage soumis à l'accord d'abuse.ch"
+    [ "$allow_extra" = yes ] && echo "Exclusions : ${ALLOW_LIST_NOTICE:-$ALLOW_LIST_URL}"
     echo "Construit le $(date -u +%F) à $(date -u +%H:%M) UTC, version $version."
 } > "$tmp/notice.txt"
 
@@ -73,4 +89,4 @@ cargo run -q --locked -p akeeper-bundle -- build --seed "$seed" --key-id "$key_i
 # Revérification avec les clés publiques que l'app embarque : un bundle que l'app refuserait n'est pas publié.
 IFS=',' read -r -a keys <<< "$RULES_PUBLIC_KEYS"
 cargo run -q --locked -p akeeper-bundle -- verify "$out/bundle.akrb" "${keys[@]}"
-echo "catégories : ads phishing doh$([ "$malware" = yes ] && echo ' malware')"
+echo "catégories : ads phishing doh allow$([ "$malware" = yes ] && echo ' malware')"

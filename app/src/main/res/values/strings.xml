@@ -160,6 +160,8 @@
     <string name="activity_scope_blocked">Bloqués</string>
     <string name="activity_scope_allowed">Autorisés</string>
     <string name="activity_scope_all">Tous</string>
+    <string name="activity_search_open">Rechercher dans le journal</string>
+    <string name="activity_clear_app">Retirer le filtre d\'app</string>
     <string name="activity_all_apps">Toutes les apps</string>
     <string name="activity_app_picker">Filtrer par app</string>
     <string name="activity_search_hint">Rechercher un domaine</string>

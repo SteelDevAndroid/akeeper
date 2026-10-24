@@ -16,6 +16,7 @@ import com.akeeper.R;
 import com.akeeper.engine.FlowEvent;
 import com.akeeper.vpn.ActivityLog;
 import com.akeeper.vpn.AppPrefs;
+import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
 
 import java.io.IOException;
@@ -87,7 +88,21 @@ final class ActivityScreen implements AutoCloseable {
                 reload();
             }
         });
-        root.findViewById(R.id.activity_app_chip).setOnClickListener(v -> pickApp());
+        Chip appChip = root.findViewById(R.id.activity_app_chip);
+        appChip.setOnClickListener(v -> pickApp());
+        appChip.setCloseIconContentDescription(activity.getString(R.string.activity_clear_app));
+        appChip.setOnCloseIconClickListener(v -> setAppFilter(ActivityLog.Query.ANY_UID, null));
+        // La recherche reste repliée tant qu'elle n'est pas demandée, pour laisser la place à la liste.
+        View searchLayout = root.findViewById(R.id.activity_search_layout);
+        root.findViewById(R.id.activity_search_button).setOnClickListener(v -> {
+            boolean open = searchLayout.getVisibility() != View.VISIBLE;
+            searchLayout.setVisibility(open ? View.VISIBLE : View.GONE);
+            if (open) {
+                search.requestFocus();
+            } else {
+                search.setText("");
+            }
+        });
         root.findViewById(R.id.activity_enable).setOnClickListener(v -> setLogEnabled());
         reload();
     }
@@ -186,13 +201,20 @@ final class ActivityScreen implements AutoCloseable {
                 .setTitle(R.string.activity_app_picker)
                 .setSingleChoiceItems(labels, checked, (dialog, which) -> {
                     dialog.dismiss();
-                    uidFilter = which == 0 ? ActivityLog.Query.ANY_UID : uids.get(which - 1);
-                    ((com.google.android.material.chip.Chip) root.findViewById(R.id.activity_app_chip))
-                            .setText(labels[which]);
-                    reload();
+                    setAppFilter(which == 0 ? ActivityLog.Query.ANY_UID : uids.get(which - 1),
+                            which == 0 ? null : labels[which]);
                 })
                 .setNegativeButton(R.string.action_cancel, null)
                 .show();
+    }
+
+    /** {@code label} nul : toutes les apps. La croix de la puce n'apparaît que lorsqu'un filtre est actif. */
+    private void setAppFilter(int uid, String label) {
+        uidFilter = uid;
+        Chip chip = root.findViewById(R.id.activity_app_chip);
+        chip.setText(label == null ? activity.getString(R.string.activity_all_apps) : label);
+        chip.setCloseIconVisible(label != null);
+        reload();
     }
 
     private void setLogEnabled() {
