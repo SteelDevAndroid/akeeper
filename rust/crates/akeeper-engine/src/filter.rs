@@ -8,6 +8,10 @@ use crate::Blocklist;
 
 /// Points d'accès DoH publics, repli utilisé tant qu'aucun bundle ne fournit sa propre liste DoH. Même fichier que
 /// celui que publie le pipeline de règles (`rules/sources/doh-hosts.txt`).
+/// Noms jamais bloqués par les catégories : connectivité, push, heure, révocation de certificats. Une liste trop
+/// stricte (ou un faux positif) ne doit pas couper le téléphone du réseau. La liste personnelle de l'utilisateur
+/// l'emporte, le contournement DNS aussi.
+const DEFAULT_ALLOWED: &str = include_str!("../../../../rules/sources/default-allow.txt");
 const DOH_HOSTS: &str = include_str!("../../../../rules/sources/doh-hosts.txt");
 
 #[derive(Debug)]
@@ -137,6 +141,7 @@ impl Cidr {
 pub struct Filter {
     user: Blocklist,
     allowed: Blocklist,
+    default_allowed: Blocklist,
     domains: Vec<(u8, Blocklist)>,
     doh: Blocklist,
     doh_ips: Vec<Cidr>,
@@ -151,6 +156,7 @@ impl Filter {
             Some(b) => Self {
                 user,
                 allowed: Blocklist::empty(),
+                default_allowed: Blocklist::from_domains(DEFAULT_ALLOWED),
                 domains: b.domains,
                 doh: b
                     .doh_domains
@@ -161,6 +167,7 @@ impl Filter {
             None => Self {
                 user,
                 allowed: Blocklist::empty(),
+                default_allowed: Blocklist::from_domains(DEFAULT_ALLOWED),
                 domains: Vec::new(),
                 doh: Blocklist::from_domains(DOH_HOSTS),
                 doh_ips: Vec::new(),
@@ -185,7 +192,7 @@ impl Filter {
     }
 
     /// Raison du refus d'un nom, `None` s'il est autorisé. `name` est déjà en minuscules (normalisé par le parseur
-    /// DNS ou TLS). Ordre : contournement DNS, exceptions, liste personnelle, catégories actives.
+    /// DNS ou TLS). Ordre : contournement DNS, exceptions, liste personnelle, exclusions par défaut, catégories actives.
     pub(crate) fn verdict(&self, name: &str) -> Option<Reason> {
         if self.is_paused() {
             return None;
@@ -198,6 +205,9 @@ impl Filter {
         }
         if self.user.blocks(name) {
             return Some(Reason::Personal);
+        }
+        if self.default_allowed.blocks(name) {
+            return None;
         }
         self.domains
             .iter()
@@ -384,6 +394,33 @@ pub(crate) mod tests {
         ] {
             assert!(!filter.blocks(site), "{site} ne doit pas être bloqué");
         }
+    }
+
+    #[test]
+    fn default_exclusions_beat_categories_but_not_the_user_or_the_dns_bypass() {
+        let bytes = bundle_bytes(
+            "connectivitycheck.gstatic.com\nads.example\n",
+            Some("dns.google\n"),
+            &[],
+        );
+        let rules = BundleRules::parse(&bytes, CategoryMask::ALL).unwrap();
+        let filter = Filter::new(Blocklist::empty(), Some(rules));
+        assert!(!filter.blocks("connectivitycheck.gstatic.com"));
+        assert!(!filter.blocks("fcm.googleapis.com"));
+        assert!(
+            !filter.blocks("a.fcm.googleapis.com"),
+            "sous-domaines compris"
+        );
+        assert!(filter.blocks("ads.example"));
+
+        // Le choix explicite de l'utilisateur l'emporte sur l'exclusion par défaut.
+        let (user, _) = Blocklist::personal("connectivitycheck.gstatic.com\n");
+        assert_eq!(
+            Filter::new(user, None).verdict("connectivitycheck.gstatic.com"),
+            Some(Reason::Personal)
+        );
+        // L'exclusion ne rouvre jamais le contournement DNS.
+        assert!(filter.blocks("dns.google"));
     }
 
     /// Bundle de test à trois catégories : publicité, malware et hameçonnage, plus la liste DoH.

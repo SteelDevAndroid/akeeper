@@ -8,7 +8,7 @@ val cargoHost = tasks.register<Exec>("cargoHostBuild") {
     commandLine("cargo", "build", "-p", "akeeper-ffi")
     inputs.files(rootProject.fileTree("rust") {
         include("Cargo.toml", "Cargo.lock", ".cargo/**", "crates/**")
-    })
+    }, rootProject.fileTree("rules/sources"))
     outputs.dir(rootProject.layout.projectDirectory.dir("rust/target/debug"))
 }
 
@@ -30,6 +30,8 @@ androidComponents {
             sources.from(rootProject.fileTree("rust") {
                 include("Cargo.toml", "Cargo.lock", ".cargo/**", "crates/**")
             })
+            // Listes compilées dans le moteur (include_str!) : un changement doit relancer cargo.
+            sources.from(rootProject.fileTree("rules/sources"))
             release.set(variant.buildType == "release")
         }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(cargo, CargoNdkBuild::outputDir)
