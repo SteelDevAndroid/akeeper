@@ -75,4 +75,42 @@
         <item quantity="many">Accès réseau partagé avec %d autres apps</item>
         <item quantity="other">Accès réseau partagé avec %d autres apps</item>
     </plurals>
+
+    <string name="action_close">Fermer</string>
+
+    <string name="settings_open">Réglages</string>
+    <string name="settings_back">Retour</string>
+    <string name="settings_title">Réglages</string>
+    <string name="settings_section_protection">Protection</string>
+    <string name="settings_section_reliability">Fiabilité</string>
+    <string name="settings_section_about">À propos</string>
+    <string name="settings_rules_title">Règles de blocage</string>
+    <string name="settings_rules_version">Version %1$d · %2$s</string>
+    <string name="settings_rules_none">Liste intégrée · aucune mise à jour reçue</string>
+    <string name="settings_rules_offline">Liste intégrée · aucun serveur de mises à jour configuré</string>
+    <string name="settings_rules_update">Mettre à jour</string>
+    <string name="settings_rules_checking">Vérification lancée</string>
+    <string name="settings_lockdown_title">Verrouillage</string>
+    <string name="settings_lockdown_on">Activé · la protection ne peut pas être contournée si l\'app s\'arrête</string>
+    <string name="settings_lockdown_off">Non activé · ouvrir les réglages VPN</string>
+    <string name="settings_battery_title">Optimisation de la batterie</string>
+    <string name="settings_battery_subtitle">Empêche votre téléphone d\'arrêter la protection en arrière-plan</string>
+    <string name="settings_limits_title">Ce qui n\'est pas couvert</string>
+    <string name="settings_licenses_title">Licences</string>
+    <string name="settings_version_title">Version</string>
+
+    <string name="limits_body">• Le profil professionnel, l\'espace privé (Private Space) et le partage de connexion ne passent pas par aKeeper.\n\n• Certaines apps système partagent leur accès réseau avec d\'autres : elles sont bloquées ou autorisées ensemble.\n\n• Avec un DNS privé en mode strict, le filtrage des sites est impossible : aKeeper vous le signale.\n\n• Sans verrouillage, la protection n\'est pas garantie si l\'app s\'arrête.\n\n• aKeeper ne lit jamais le contenu des pages chiffrées.</string>
+
+    <string name="licenses_app">aKeeper est un logiciel libre, publié sous licence GPL-3.0.</string>
+    <string name="licenses_sources_none">Aucune liste de blocage reçue pour l\'instant : les sources et leurs licences apparaîtront ici avec la première mise à jour des règles.</string>
+
+    <string name="battery_title">Garder la protection active</string>
+    <string name="battery_intro">Votre téléphone peut arrêter aKeeper pour économiser la batterie. Sans verrouillage, la protection s\'arrête alors sans prévenir. Les intitulés varient selon la version du système.</string>
+    <string name="battery_steps_xiaomi">Activez le démarrage automatique d\'aKeeper, puis réglez l\'économiseur de batterie de l\'app sur « Aucune restriction ».</string>
+    <string name="battery_steps_samsung">Retirez aKeeper des « Apps en veille prolongée », puis réglez la batterie de l\'app sur « Sans restriction ».</string>
+    <string name="battery_steps_oppo">Autorisez le démarrage automatique et l\'activité en arrière-plan d\'aKeeper dans les réglages de batterie.</string>
+    <string name="battery_steps_vivo">Autorisez l\'exécution en arrière-plan d\'aKeeper malgré la consommation, dans les réglages de batterie.</string>
+    <string name="battery_steps_honor">Dans « Lancement d\'apps », désactivez la gestion automatique d\'aKeeper et autorisez le démarrage automatique.</string>
+    <string name="battery_open">Ouvrir les réglages</string>
+    <string name="battery_done">Terminer</string>
 </resources>

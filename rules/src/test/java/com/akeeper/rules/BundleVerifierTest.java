@@ -42,6 +42,22 @@ class BundleVerifierTest {
     }
 
     @Test
+    void readsTheNoticeOfTheSharedFixture() throws IOException {
+        try (var in = getClass().getResourceAsStream("fixture-v5.akrb")) {
+            assertThat(BundleVerifier.notice(in.readAllBytes())).contains("Listes de test, domaine public.");
+        }
+    }
+
+    @Test
+    void readsTheNoticeOfAJavaBuiltBundleAndToleratesGarbage() throws GeneralSecurityException {
+        assertThat(BundleVerifier.notice(TestBundles.signed(first, 0, 1, 0))).contains("test");
+        assertThat(BundleVerifier.notice(new byte[10])).isEmpty();
+        var oversized = TestBundles.signed(first, 0, 1, 0);
+        oversized[BundleVerifier.HEADER_LEN + 7] = 100;
+        assertThat(BundleVerifier.notice(oversized)).isEmpty();
+    }
+
+    @Test
     void selectsTheKeyNamedInTheHeader() throws GeneralSecurityException {
         assertThat(verifier.verify(TestBundles.signed(second, 1, 3, 0)).version()).isEqualTo(3);
         // key_id 0 désigne la première clé : la seconde ne peut pas signer en son nom.

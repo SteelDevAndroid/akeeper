@@ -76,6 +76,17 @@ Pas encore livrés :
 - **Mise à jour** : `RuleUpdateWorker` (WorkManager) tourne toutes les 12 h avec réseau requis, en GET conditionnel. Il est planifié par le service, car Always-on démarre sans ouvrir l'UI.
 - **Outil** `akeeper-bundle` (`keygen`, `build`, `verify`) : un fixture signé avec une clé de test est vérifié à la fois par les tests Rust et par les tests Java.
 
+**Écrans Réglages (R1), R3, Licences et O6 livrés** : engrenage dans l'en-tête de l'Accueil et des Apps, bouton retour.
+- **Règles de blocage** : version et date du bundle actif, bouton **Mettre à jour** (vérification immédiate par WorkManager). Le bouton n'apparaît que si `akeeper.rulesUrl` est renseigné ; sinon l'écran dit « Liste intégrée ».
+- **Verrouillage** : état, avec un appui qui ouvre les réglages VPN.
+- **Optimisation batterie (O6)** : ligne affichée seulement pour Xiaomi (Redmi, POCO), Samsung, Oppo (OnePlus, realme), Vivo (iQOO) et Honor ; boîte de dialogue avec les étapes de l'OEM et un bouton vers la fiche de l'app.
+- **R3 et Licences** : boîtes de dialogue. Les licences affichent le texte `NOTICE` du bundle actif, vérifié, donc les sources réellement incluses.
+- **Écarts avec `docs/ui-ecrans.md`** :
+  - la ligne Verrouillage ouvre directement les réglages VPN au lieu de revenir à O4 ;
+  - O6 n'a pas d'intent propre à chaque OEM, faute de pouvoir les vérifier sur appareil ;
+  - R3, Licences et O6 sont des boîtes de dialogue, pas des écrans, pour rester sans Fragments.
+- **Absents, car sans fonction derrière** : réseau local (R1 : l'option n'existe pas dans le service), journal et durée de conservation (pas de Room), statistiques anonymes, bannière Protection avancée (liée à l'option réseau local), listes par catégorie (R2).
+
 Restent pour J5 :
 - **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
 - **Pinning TLS** du serveur de règles.
