@@ -45,7 +45,7 @@ final class SettingsScreen implements AutoCloseable {
     private final TextView rulesSummary;
     private final TextView lockdownSummary;
 
-    SettingsScreen(AppCompatActivity activity, View root, Runnable onBack) {
+    SettingsScreen(AppCompatActivity activity, View root, Runnable onBack, Runnable onLists) {
         this.activity = activity;
         this.rules = RuleStore.get(activity);
         this.oem = OemGuide.of(Build.MANUFACTURER);
@@ -53,7 +53,9 @@ final class SettingsScreen implements AutoCloseable {
         root.findViewById(R.id.settings_back).setOnClickListener(v -> onBack.run());
 
         ViewGroup protection = root.findViewById(R.id.settings_protection);
-        var rulesRow = addRow(protection, 0, R.string.settings_rules_title, "");
+        addRow(protection, 0, R.string.settings_lists_title, activity.getString(R.string.settings_lists_subtitle))
+                .setOnClickListener(v -> onLists.run());
+        var rulesRow = addRow(protection, 1, R.string.settings_rules_title, "");
         rulesRow.setClickable(false);
         rulesRow.findViewById(R.id.row_chevron).setVisibility(View.GONE);
         rulesSummary = rulesRow.findViewById(R.id.row_subtitle);

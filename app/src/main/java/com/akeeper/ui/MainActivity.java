@@ -48,6 +48,7 @@ public final class MainActivity extends AppCompatActivity {
     private static final String STATE_CONSENT_REFUSED = "consent_refused";
     private static final String STATE_APPS_TAB = "apps_tab";
     private static final String STATE_SETTINGS = "settings_open";
+    private static final String STATE_LISTS = "lists_open";
     // Marqueur dans noBackupFilesDir : jamais sauvegardé ni transféré, aucune donnée sensible.
     private static final String ONBOARDING_MARKER = "onboarding_done";
     private static final int ONBOARDING_STEPS = 4;
@@ -76,13 +77,17 @@ public final class MainActivity extends AppCompatActivity {
     private int shownLayout;
     private boolean appsTab;
     private boolean settingsOpen;
+    private boolean listsOpen;
     private AppsScreen appsScreen;
     private SettingsScreen settingsScreen;
+    private ListsScreen listsScreen;
     // Retour depuis les Réglages ou l'onglet Apps : revient en arrière au lieu de quitter l'app.
     private final OnBackPressedCallback backToHome = new OnBackPressedCallback(false) {
         @Override
         public void handleOnBackPressed() {
-            if (settingsOpen) {
+            if (listsOpen) {
+                setListsOpen(false);
+            } else if (settingsOpen) {
                 setSettingsOpen(false);
             } else {
                 selectTab(false);
@@ -104,6 +109,7 @@ public final class MainActivity extends AppCompatActivity {
             consentRefused = savedInstanceState.getBoolean(STATE_CONSENT_REFUSED);
             appsTab = savedInstanceState.getBoolean(STATE_APPS_TAB);
             settingsOpen = savedInstanceState.getBoolean(STATE_SETTINGS);
+            listsOpen = savedInstanceState.getBoolean(STATE_LISTS);
         }
     }
 
@@ -115,6 +121,7 @@ public final class MainActivity extends AppCompatActivity {
         outState.putBoolean(STATE_CONSENT_REFUSED, consentRefused);
         outState.putBoolean(STATE_APPS_TAB, appsTab);
         outState.putBoolean(STATE_SETTINGS, settingsOpen);
+        outState.putBoolean(STATE_LISTS, listsOpen);
     }
 
     @Override
@@ -188,6 +195,7 @@ public final class MainActivity extends AppCompatActivity {
             markOnboardingDone(marker);
         }
         int layout = step != Step.HOME ? R.layout.screen_onboarding
+                : listsOpen ? R.layout.screen_lists
                 : settingsOpen ? R.layout.screen_settings
                 : appsTab ? R.layout.screen_apps : R.layout.screen_home;
         if (layout != shownLayout) {
@@ -204,18 +212,23 @@ public final class MainActivity extends AppCompatActivity {
                 appsScreen = new AppsScreen(this, root);
             }
             if (layout == R.layout.screen_settings) {
-                settingsScreen = new SettingsScreen(this, root, () -> setSettingsOpen(false));
+                settingsScreen = new SettingsScreen(this, root, () -> setSettingsOpen(false), () -> setListsOpen(true));
+            }
+            if (layout == R.layout.screen_lists) {
+                listsScreen = new ListsScreen(this, root, () -> setListsOpen(false));
             }
         }
         shown = step;
-        backToHome.setEnabled(step == Step.HOME && (appsTab || settingsOpen));
+        backToHome.setEnabled(step == Step.HOME && (appsTab || settingsOpen || listsOpen));
         switch (step) {
             case DISCLOSURE -> renderDisclosure();
             case VPN_CONSENT -> renderConsent();
             case NOTIFICATIONS -> renderNotifications();
             case LOCKDOWN -> renderLockdown();
             case HOME -> {
-                if (settingsOpen) {
+                if (listsOpen) {
+                    // Les listes se tiennent à jour seules, par leurs observateurs.
+                } else if (settingsOpen) {
                     settingsScreen.refresh();
                 } else if (!appsTab) {
                     renderHome();
@@ -245,6 +258,11 @@ public final class MainActivity extends AppCompatActivity {
         render();
     }
 
+    private void setListsOpen(boolean open) {
+        listsOpen = open;
+        render();
+    }
+
     private void closeScreens() {
         if (appsScreen != null) {
             appsScreen.close();
@@ -253,6 +271,10 @@ public final class MainActivity extends AppCompatActivity {
         if (settingsScreen != null) {
             settingsScreen.close();
             settingsScreen = null;
+        }
+        if (listsScreen != null) {
+            listsScreen.close();
+            listsScreen = null;
         }
     }
 

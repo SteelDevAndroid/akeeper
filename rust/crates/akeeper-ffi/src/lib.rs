@@ -12,7 +12,9 @@ use std::time::Duration;
 use std::net::{IpAddr, SocketAddr};
 use std::os::fd::RawFd;
 
-use akeeper_engine::{Blocklist, BundleRules, Config, Counter, Engine, Filter, Host, SharedHost};
+use akeeper_engine::{
+    Blocklist, BundleRules, CategoryMask, Config, Counter, Engine, Filter, Host, SharedHost,
+};
 use jni::objects::{GlobalRef, JClass as JniClass, JIntArray, JObject, JValue};
 use jni::{JNIEnv, JavaVM};
 
@@ -23,7 +25,7 @@ type JLong = i64;
 
 /// Prend possession de `tun_fd`, `blocklist_fd` et `bundle_fd` (détachés côté Java ; -1 = absent) et renvoie un
 /// handle opaque, ou 0 en cas d'échec (liste personnelle illisible comprise ; un bundle illisible est ignoré).
-/// Les fd sont fermés dans tous les cas.
+/// Les fd sont fermés dans tous les cas. `categories` : un bit par catégorie du bundle laissée active.
 /// `host` implémente `NativeEngine.Host` ; une référence globale est conservée jusqu'à `nativeStop`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeStart<'local>(
@@ -32,10 +34,11 @@ pub extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeStart<'local>(
     tun_fd: JInt,
     blocklist_fd: JInt,
     bundle_fd: JInt,
+    categories: JInt,
     host: JObject<'local>,
 ) -> JLong {
     let tun = owned(tun_fd);
-    let rules = (owned(blocklist_fd), owned(bundle_fd));
+    let rules = RuleSources::new(blocklist_fd, bundle_fd, categories);
     let (Some(tun), Some(host)) = (tun, JavaHost::new(&mut env, &host)) else {
         return 0;
     };
@@ -152,14 +155,15 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeSetRule
     handle: JLong,
     blocklist_fd: JInt,
     bundle_fd: JInt,
+    categories: JInt,
 ) -> JInt {
-    let rules = (owned(blocklist_fd), owned(bundle_fd));
+    let rules = RuleSources::new(blocklist_fd, bundle_fd, categories);
     // SAFETY: contrat de la fonction ; lecture seule via &Engine.
     let Some(engine) = (unsafe { (handle as *const Engine).as_ref() }) else {
         return -1;
     };
     let applied = catch_unwind(AssertUnwindSafe(|| {
-        let filter = load_filter(rules.0, rules.1)?;
+        let filter = load_filter(rules)?;
         engine.set_filter(filter)
     }));
     match applied {
@@ -199,45 +203,69 @@ fn owned(fd: JInt) -> Option<OwnedFd> {
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-type RuleFds = (Option<OwnedFd>, Option<OwnedFd>);
+/// Règles à charger : liste personnelle, bundle, et catégories du bundle laissées actives.
+struct RuleSources {
+    personal: Option<OwnedFd>,
+    bundle: Option<OwnedFd>,
+    categories: CategoryMask,
+}
 
-fn start(tun: OwnedFd, rules: RuleFds, host: SharedHost) -> JLong {
+impl RuleSources {
+    fn new(personal_fd: JInt, bundle_fd: JInt, categories: JInt) -> Self {
+        Self {
+            personal: owned(personal_fd),
+            bundle: owned(bundle_fd),
+            // Les bits d'un entier signé Java : -1 active tout.
+            categories: CategoryMask::from_bits(categories as u32),
+        }
+    }
+}
+
+fn start(tun: OwnedFd, rules: RuleSources, host: SharedHost) -> JLong {
     if set_nonblocking(&tun).is_err() {
         return 0;
     }
-    let Ok(blocklist) = read_blocklist(rules.0) else {
+    let Ok(personal) = read_personal(rules.personal) else {
         return 0;
     };
     // Bundle signé mais illisible (défaut du pipeline) : le plancher anti-rollback empêche d'en revenir, donc
     // refuser de démarrer couperait la protection jusqu'au bundle suivant. Le moteur démarre sans lui.
-    let bundle = read_bundle(rules.1).unwrap_or(None);
-    let filter = Filter::new(blocklist, bundle);
+    let bundle = read_bundle(rules.bundle, rules.categories).unwrap_or(None);
+    let filter = Filter::new(personal.0, bundle).with_allowed(personal.1);
     match Engine::start(tun, Config { filter, host }) {
         Ok(engine) => Box::into_raw(Box::new(engine)) as JLong,
         Err(_) => 0,
     }
 }
 
-fn load_filter(blocklist: Option<OwnedFd>, bundle: Option<OwnedFd>) -> std::io::Result<Filter> {
+fn load_filter(rules: RuleSources) -> std::io::Result<Filter> {
     // Les deux fd sont lus avant tout échec : chacun est fermé quoi qu'il arrive.
-    let (blocklist, bundle) = (read_blocklist(blocklist), read_bundle(bundle));
-    Ok(Filter::new(blocklist?, bundle?))
+    let (personal, bundle) = (
+        read_personal(rules.personal),
+        read_bundle(rules.bundle, rules.categories),
+    );
+    let (blocked, allowed) = personal?;
+    Ok(Filter::new(blocked, bundle?).with_allowed(allowed))
 }
 
-fn read_blocklist(fd: Option<OwnedFd>) -> std::io::Result<Blocklist> {
+/// `(bloqués, exceptions)` de la liste personnelle.
+fn read_personal(fd: Option<OwnedFd>) -> std::io::Result<(Blocklist, Blocklist)> {
     let Some(fd) = fd else {
-        return Ok(Blocklist::empty());
+        return Ok((Blocklist::empty(), Blocklist::empty()));
     };
     let text = read_bounded(fd, MAX_BLOCKLIST_BYTES)?;
-    Ok(Blocklist::from_domains(&String::from_utf8_lossy(&text)))
+    Ok(Blocklist::personal(&String::from_utf8_lossy(&text)))
 }
 
-fn read_bundle(fd: Option<OwnedFd>) -> std::io::Result<Option<BundleRules>> {
+fn read_bundle(
+    fd: Option<OwnedFd>,
+    categories: CategoryMask,
+) -> std::io::Result<Option<BundleRules>> {
     let Some(fd) = fd else {
         return Ok(None);
     };
     let bytes = read_bounded(fd, MAX_BUNDLE_BYTES)?;
-    BundleRules::parse(&bytes)
+    BundleRules::parse(&bytes, categories)
         .map(Some)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{e:?}")))
 }
@@ -359,7 +387,15 @@ mod tests {
     }
 
     fn start_with(tun: OwnedFd, blocklist: Option<OwnedFd>) -> JLong {
-        super::start(tun, (blocklist, None), Arc::new(AllowAll))
+        super::start(tun, sources(blocklist, None), Arc::new(AllowAll))
+    }
+
+    fn sources(personal: Option<OwnedFd>, bundle: Option<OwnedFd>) -> RuleSources {
+        RuleSources {
+            personal,
+            bundle,
+            categories: CategoryMask::ALL,
+        }
     }
 
     fn pipe_with(bytes: &[u8]) -> OwnedFd {
@@ -390,6 +426,7 @@ mod tests {
                 handle,
                 blocklist,
                 bundle,
+                -1,
             )
         }
     }
@@ -463,7 +500,7 @@ mod tests {
         let (_app, engine_side) = UnixDatagram::pair().unwrap();
         let handle = super::start(
             OwnedFd::from(engine_side),
-            (None, Some(pipe_with(&bundle(3)))),
+            sources(None, Some(pipe_with(&bundle(3)))),
             Arc::new(AllowAll),
         );
         assert_ne!(handle, 0);
@@ -488,7 +525,7 @@ mod tests {
         let (_app, engine_side) = UnixDatagram::pair().unwrap();
         let handle = super::start(
             OwnedFd::from(engine_side),
-            (None, Some(pipe_with(b"AKRB garbage"))),
+            sources(None, Some(pipe_with(b"AKRB garbage"))),
             Arc::new(AllowAll),
         );
         assert_ne!(handle, 0);

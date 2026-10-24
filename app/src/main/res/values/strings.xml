@@ -124,4 +124,32 @@
     <string name="home_paused_sub">Les sites ne sont plus filtrés. Les règles par app restent actives.</string>
     <string name="home_pause_action">Pause 15 min</string>
     <string name="home_resume_action">Reprendre maintenant</string>
+
+    <string name="settings_lists_title">Listes de blocage</string>
+    <string name="settings_lists_subtitle">Catégories, exceptions et domaines personnels</string>
+
+    <string name="lists_title">Listes de blocage</string>
+    <string name="lists_section_categories">Catégories</string>
+    <string name="category_ads">Publicités et traqueurs</string>
+    <string name="category_ads_sub">Sites publicitaires et traqueurs connus</string>
+    <string name="category_phishing">Hameçonnage</string>
+    <string name="category_phishing_sub">Faux sites qui volent des identifiants</string>
+    <string name="category_malware">Sites malveillants</string>
+    <string name="category_malware_sub">Sites qui diffusent des logiciels malveillants</string>
+    <string name="category_unavailable">Pas encore disponible : arrive avec les mises à jour des règles</string>
+    <string name="category_prefs_unavailable">Réglage indisponible sur cet appareil</string>
+    <string name="lists_bypass_title">Contournement DNS</string>
+    <string name="lists_bypass_sub">Toujours actif · empêche les apps d\'échapper au filtrage</string>
+    <string name="lists_allowed_title">Exceptions personnelles</string>
+    <string name="lists_allowed_hint">Domaines toujours autorisés, même s\'ils figurent dans une liste. Le contournement DNS ne peut pas être autorisé.</string>
+    <string name="lists_blocked_title">Domaines bloqués personnels</string>
+    <string name="lists_blocked_hint">Domaines toujours bloqués, sous-domaines compris.</string>
+    <string name="lists_domain_label">Domaine, par exemple exemple.com</string>
+    <string name="lists_domain_invalid">Domaine non valide</string>
+    <string name="lists_add">Ajouter</string>
+    <string name="lists_empty">Aucun domaine</string>
+    <string name="lists_remove">Retirer %1$s</string>
+    <string name="lists_removed">%1$s retiré</string>
+    <string name="lists_undo">Annuler</string>
+    <string name="lists_save_failed">Enregistrement impossible</string>
 </resources>

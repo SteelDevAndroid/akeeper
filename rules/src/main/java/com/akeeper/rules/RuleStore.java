@@ -198,6 +198,18 @@ public final class RuleStore {
         }
     }
 
+    /** Catégories de domaines des règles en vigueur (téléchargées ou intégrées), pour les interrupteurs de R2. */
+    public Set<Integer> categories() {
+        try (var active = openRules().orElse(null)) {
+            if (active == null) {
+                return Set.of();
+            }
+            return BundleVerifier.categories(readBounded(active.stream()));
+        } catch (IOException unreadable) {
+            return Set.of();
+        }
+    }
+
     /** L'observateur est appelé après chaque activation, sur le thread de la mise à jour. */
     public Subscription observe(Runnable listener) {
         listeners.add(listener);

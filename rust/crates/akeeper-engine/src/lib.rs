@@ -11,7 +11,7 @@ mod udp_nat;
 pub use akeeper_proto::bundle::MAX_BUNDLE;
 pub use blocklist::Blocklist;
 pub use dns::MAX_UPSTREAMS;
-pub use filter::{BundleRules, Filter, RulesError};
+pub use filter::{BundleRules, CategoryMask, Filter, Reason, RulesError};
 pub use stats::{Counter, Stats};
 
 use std::collections::HashSet;
@@ -1287,7 +1287,7 @@ mod tests {
         let mut config = config("", true);
         config.filter = Filter::new(
             Blocklist::empty(),
-            Some(BundleRules::parse(bundle).unwrap()),
+            Some(BundleRules::parse(bundle, CategoryMask::ALL).unwrap()),
         );
         let engine = Engine::start(OwnedFd::from(engine_side), config).unwrap();
         (app, engine)
@@ -1329,7 +1329,7 @@ mod tests {
         engine
             .set_filter(Filter::new(
                 Blocklist::empty(),
-                Some(BundleRules::parse(&bundle).unwrap()),
+                Some(BundleRules::parse(&bundle, CategoryMask::ALL).unwrap()),
             ))
             .unwrap();
         // La commande et le paquet arrivent par deux sources epoll distinctes : l'ordre n'est pas garanti.

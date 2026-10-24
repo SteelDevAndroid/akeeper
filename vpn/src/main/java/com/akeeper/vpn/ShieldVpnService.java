@@ -41,6 +41,11 @@ public final class ShieldVpnService extends VpnService {
     private UpstreamDns upstream;
     private ShieldStatus.Subscription appRules;
     private RuleStore.Subscription ruleUpdates;
+    private ShieldStatus.Subscription prefsChanges;
+    private ShieldStatus.Subscription listsChanges;
+    private AppPrefs prefs;
+    // Une lecture suivie de l'envoi au moteur ne doit pas s'entrecroiser avec une autre : la dernière gagne.
+    private final Object reloadLock = new Object();
     private boolean privateDnsStrict;
     // Fin de la pause en horloge murale, pour l'affichage ; le moteur mesure la durée avec son horloge monotone.
     private long pausedUntil;
@@ -128,7 +133,13 @@ public final class ShieldVpnService extends VpnService {
         }
         var rules = RuleStore.get(this);
         try {
-            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), openBundle(rules),
+            prefs = AppPrefs.get(this);
+        } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+            // Keystore indisponible : préférences par défaut, donc toutes les catégories actives.
+            prefs = null;
+        }
+        try {
+            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), openBundle(rules), categoryMask(prefs),
                     new EngineHost(new FlowOwnerResolver(getSystemService(ConnectivityManager.class))));
         } catch (IllegalStateException e) {
             return false;
@@ -136,8 +147,14 @@ public final class ShieldVpnService extends VpnService {
         ShieldStatus.attach(engine);
         applyAppRules();
         // Moteur capturé, comme pour les règles par app : l'activation arrive sur le thread de WorkManager.
-        var current = engine;
-        ruleUpdates = rules.observe(() -> current.setRules(openBlocklist(), openBundle(rules)));
+        // Valeurs capturées : ces observateurs tournent hors du thread principal, qui peut arrêter le service.
+        var running = engine;
+        var preferences = prefs;
+        ruleUpdates = rules.observe(() -> reloadRules(running, rules, preferences));
+        listsChanges = UserLists.get(this).observe(lists -> reloadRules(running, rules, preferences));
+        if (preferences != null) {
+            prefsChanges = preferences.observe(settings -> reloadRules(running, rules, preferences));
+        }
         // Planifiée ici et non dans l'UI : Always-on VPN démarre le service sans jamais ouvrir l'app.
         RuleUpdates.schedule(this);
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
@@ -204,6 +221,20 @@ public final class ShieldVpnService extends VpnService {
         }
     }
 
+    private static int categoryMask(AppPrefs prefs) {
+        return RuleCategory.mask((prefs == null ? AppPrefs.Settings.DEFAULT : prefs.settings()).disabledCategories());
+    }
+
+    /**
+     * Relit la liste personnelle, le bundle et les catégories actives, et remplace les règles du moteur. Après
+     * {@code close()}, {@code setRules} est simplement sans effet.
+     */
+    private void reloadRules(NativeEngine target, RuleStore rules, AppPrefs preferences) {
+        synchronized (reloadLock) {
+            target.setRules(openBlocklist(), openBundle(rules), categoryMask(preferences));
+        }
+    }
+
     /** Règles cédées au moteur : bundle signé, sinon liste intégrée à l'APK ; -1 si aucune n'est lisible. */
     private static int openBundle(RuleStore rules) {
         return rules.openRules().map(active -> {
@@ -238,6 +269,13 @@ public final class ShieldVpnService extends VpnService {
     private void shutdown() {
         main.removeCallbacks(endPause);
         pausedUntil = 0;
+        for (var subscription : new ShieldStatus.Subscription[]{prefsChanges, listsChanges}) {
+            if (subscription != null) {
+                subscription.close();
+            }
+        }
+        prefsChanges = null;
+        listsChanges = null;
         if (ruleUpdates != null) {
             ruleUpdates.close();
             ruleUpdates = null;

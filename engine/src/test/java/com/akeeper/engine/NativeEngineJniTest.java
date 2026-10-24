@@ -63,7 +63,7 @@ class NativeEngineJniTest {
             engineSide = server.accept();
         }
         upstream = new ServerSocket(0, 5, InetAddress.getByAddress(LOOPBACK));
-        engine = NativeEngine.start(rawFd(engineSide), -1, -1, host);
+        engine = NativeEngine.start(rawFd(engineSide), -1, -1, -1, host);
     }
 
     @AfterEach
@@ -111,7 +111,7 @@ class NativeEngineJniTest {
 
     @Test
     void replacesTheRulesAndCountsPackets() throws Exception {
-        assertThat(engine.setRules(-1, -1)).isTrue();
+        assertThat(engine.setRules(-1, -1, -1)).isTrue();
         app.write(ByteBuffer.wrap(new byte[]{0x45}));
         await(() -> engine.counter(NativeEngine.Counter.MALFORMED) == 1);
         assertThat(engine.counter(NativeEngine.Counter.PACKETS)).isEqualTo(1);

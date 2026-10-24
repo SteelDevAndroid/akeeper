@@ -5,10 +5,13 @@ import com.google.crypto.tink.subtle.Ed25519Verify;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Vérifie l'enveloppe et la signature Ed25519 d'un bundle avant toute activation. Le moteur natif relit ensuite
@@ -24,7 +27,9 @@ public final class BundleVerifier {
     public static final int MAX_BUNDLE = 32 * 1024 * 1024;
     private static final int PUBLIC_KEY_LEN = 32;
     private static final int SECTION_HEADER = 8;
+    private static final int KIND_DOMAINS = 1;
     private static final int KIND_NOTICE = 3;
+    private static final int CATEGORY_DOH = 4;
 
     // Indexé par key_id : la rotation ajoute la clé suivante sans retirer celle qui signe encore.
     private final List<Ed25519Verify> keys;
@@ -45,29 +50,48 @@ public final class BundleVerifier {
         return new BundleVerifier(keys);
     }
 
+    /** Section d'un bundle déjà contrôlé : type, catégorie, et position de ses données. */
+    private record Section(int kind, int category, int offset, int length) {
+    }
+
     /**
-     * Texte {@code NOTICE} (sources et licences) d'un bundle <b>déjà vérifié</b>. Les sections ont été bornées par
-     * {@link #verify} ; un découpage incohérent donne simplement un texte absent.
+     * Sections d'un bundle <b>déjà contrôlé</b> par {@link #parse}. Les longueurs sont rebornées ici : un découpage
+     * incohérent arrête simplement la lecture.
      */
-    public static Optional<String> notice(byte[] verifiedBundle) {
+    private static List<Section> sections(byte[] bundle) {
+        var sections = new ArrayList<Section>();
         int offset = HEADER_LEN;
-        int end = verifiedBundle.length - SIGNATURE_LEN;
+        int end = bundle.length - SIGNATURE_LEN;
         while (offset + SECTION_HEADER <= end) {
-            var header = ByteBuffer.wrap(verifiedBundle, offset, SECTION_HEADER);
+            var header = ByteBuffer.wrap(bundle, offset, SECTION_HEADER);
             int kind = Byte.toUnsignedInt(header.get());
-            header.get();
+            int category = Byte.toUnsignedInt(header.get());
             header.getShort();
             long length = Integer.toUnsignedLong(header.getInt());
             offset += SECTION_HEADER;
             if (length > end - offset) {
-                return Optional.empty();
+                break;
             }
-            if (kind == KIND_NOTICE) {
-                return Optional.of(new String(verifiedBundle, offset, (int) length, StandardCharsets.UTF_8));
-            }
+            sections.add(new Section(kind, category, offset, (int) length));
             offset += (int) length;
         }
-        return Optional.empty();
+        return sections;
+    }
+
+    /** Texte {@code NOTICE} (sources et licences) d'un bundle déjà contrôlé. */
+    public static Optional<String> notice(byte[] checkedBundle) {
+        return sections(checkedBundle).stream()
+                .filter(section -> section.kind() == KIND_NOTICE)
+                .findFirst()
+                .map(section -> new String(checkedBundle, section.offset(), section.length(), StandardCharsets.UTF_8));
+    }
+
+    /** Catégories de domaines que contient un bundle déjà contrôlé, hors DoH, qui n'a pas d'interrupteur. */
+    public static Set<Integer> categories(byte[] checkedBundle) {
+        return sections(checkedBundle).stream()
+                .filter(section -> section.kind() == KIND_DOMAINS && section.category() != CATEGORY_DOH)
+                .map(Section::category)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /**

@@ -24,6 +24,22 @@ impl Blocklist {
         Self(Set::from_iter(keys).unwrap_or_default())
     }
 
+    /// Liste personnelle : une règle par ligne, `#` commente. Un nom préfixé de `@@` est une exception (toujours
+    /// autorisé), les autres sont bloqués. Renvoie `(bloqués, exceptions)`.
+    pub fn personal(text: &str) -> (Self, Self) {
+        let (mut blocked, mut allowed) = (String::new(), String::new());
+        for line in text.lines() {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            let (target, name) = match line.strip_prefix("@@") {
+                Some(name) => (&mut allowed, name),
+                None => (&mut blocked, line),
+            };
+            target.push_str(name.trim());
+            target.push('\n');
+        }
+        (Self::from_domains(&blocked), Self::from_domains(&allowed))
+    }
+
     /// FST déjà construit (bundle signé) : sa somme de contrôle est vérifiée, car une recherche dans un FST
     /// corrompu peut paniquer.
     pub fn from_fst(bytes: Vec<u8>) -> Result<Self, fst::Error> {
@@ -102,6 +118,16 @@ mod tests {
         corrupted[middle] ^= 0xff;
         assert!(Blocklist::from_fst(corrupted).is_err());
         assert!(Blocklist::from_fst(b"not an fst".to_vec()).is_err());
+    }
+
+    #[test]
+    fn splits_personal_rules_into_blocks_and_exceptions() {
+        let (blocked, allowed) = Blocklist::personal(
+            "# mes règles\nads.example.net\n@@ok.example.net  # toujours permis\n@@\nbad domain\n",
+        );
+        assert!(blocked.blocks("ads.example.net") && !blocked.blocks("ok.example.net"));
+        assert!(allowed.blocks("cdn.ok.example.net") && !allowed.blocks("ads.example.net"));
+        assert_eq!((blocked.len(), allowed.len()), (1, 1));
     }
 
     #[test]

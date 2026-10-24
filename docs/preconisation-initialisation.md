@@ -104,6 +104,13 @@ Pas encore livrés :
 - **Non essayé** : le téléchargement réel d'URLhaus, faute de clé, et la publication sur Pages. Le script a été exécuté ici sur de vraies listes HaGeZi et Phishing Army, avec une clé de test.
 - **À faire par le porteur** : clés, secrets, variables, Pages (voir `docs/bundle-regles.md`).
 
+**R2, listes de blocage livré** :
+- **Catégories** : Publicités et traqueurs, Hameçonnage, Sites malveillants, avec un interrupteur chacune. Une catégorie absente des règles en vigueur est grisée avec « Pas encore disponible » : aujourd'hui la liste intégrée ne porte que la publicité. Les préférences sont chiffrées (`AppPrefs`).
+- **Contournement DNS** : ligne sans interrupteur, toujours active.
+- **Listes personnelles** : exceptions et domaines bloqués, validés en direct (`DomainRules`), avec « Annuler » après un retrait. Un domaine ajouté d'un côté est retiré de l'autre.
+- **Moteur** : ordre d'évaluation = contournement DNS, exceptions, domaines personnels, catégories actives. Une exception gagne sur tout sauf sur le contournement DNS, comme le demande A5. `nativeStart` et `nativeSetRules` reçoivent un masque de catégories.
+- **Écarts** : pas de niveau « standard / renforcé » pour la publicité (une seule liste existe) ; les exceptions ne peuvent pas être ajoutées depuis le détail d'un événement (A5, chantier suivant).
+
 Restent pour J5 :
 - **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
 - **Pinning TLS** du serveur de règles.

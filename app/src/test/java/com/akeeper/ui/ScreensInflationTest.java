@@ -25,7 +25,7 @@ public class ScreensInflationTest {
     public void inflatesEveryLayout() {
         var activity = activity();
         for (int layout : new int[]{R.layout.screen_onboarding, R.layout.screen_home, R.layout.screen_apps,
-                R.layout.screen_settings}) {
+                R.layout.screen_settings, R.layout.screen_lists}) {
             activity.setContentView(layout);
             assertThat((View) activity.findViewById(R.id.root)).isNotNull();
         }
@@ -36,9 +36,18 @@ public class ScreensInflationTest {
         var activity = activity();
         activity.setContentView(R.layout.screen_settings);
         var screen = new SettingsScreen(activity, activity.findViewById(R.id.root), () -> {
+        }, () -> {
         });
         screen.refresh();
         screen.close();
+    }
+
+    @Test
+    public void bindsTheListsScreen() {
+        var activity = activity();
+        activity.setContentView(R.layout.screen_lists);
+        new ListsScreen(activity, activity.findViewById(R.id.root), () -> {
+        }).close();
     }
 
     @Test

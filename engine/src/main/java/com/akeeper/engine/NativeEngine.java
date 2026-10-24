@@ -48,12 +48,13 @@ public final class NativeEngine implements AutoCloseable {
      * Le moteur prend possession des fd détachés et les ferme, y compris en cas d'échec. Une liste personnelle
      * illisible fait échouer le démarrage ; un bundle illisible est ignoré (liste personnelle et repli DoH seuls).
      *
-     * @param blocklistFd liste personnelle de domaines, un par ligne ; -1 pour une liste vide
-     * @param bundleFd    bundle de règles <b>déjà vérifié</b> ({@code RuleStore.openActive}) ; -1 si absent
+     * @param blocklistFd liste personnelle de domaines, un par ligne, {@code @@} devant une exception ; -1 si vide
+     * @param bundleFd    bundle de règles <b>déjà vérifié</b> ({@code RuleStore.openRules}) ; -1 si absent
+     * @param categories  un bit par catégorie du bundle laissée active (-1 : toutes)
      * @param host        référencé par le moteur jusqu'à {@link #close()}
      */
-    public static NativeEngine start(int detachedTunFd, int blocklistFd, int bundleFd, Host host) {
-        long h = nativeStart(detachedTunFd, blocklistFd, bundleFd, host);
+    public static NativeEngine start(int detachedTunFd, int blocklistFd, int bundleFd, int categories, Host host) {
+        long h = nativeStart(detachedTunFd, blocklistFd, bundleFd, categories, host);
         if (h == 0) {
             throw new IllegalStateException("Démarrage du moteur natif impossible");
         }
@@ -85,13 +86,13 @@ public final class NativeEngine implements AutoCloseable {
      *
      * @return {@code false} si le moteur est arrêté ou les règles illisibles : les règles en place restent actives
      */
-    public synchronized boolean setRules(int blocklistFd, int bundleFd) {
+    public synchronized boolean setRules(int blocklistFd, int bundleFd, int categories) {
         if (handle == 0) {
             closeQuietly(blocklistFd);
             closeQuietly(bundleFd);
             return false;
         }
-        return nativeSetRules(handle, blocklistFd, bundleFd) == 0;
+        return nativeSetRules(handle, blocklistFd, bundleFd, categories) == 0;
     }
 
     /**
@@ -130,9 +131,9 @@ public final class NativeEngine implements AutoCloseable {
         }
     }
 
-    private static native long nativeStart(int tunFd, int blocklistFd, int bundleFd, Host host);
+    private static native long nativeStart(int tunFd, int blocklistFd, int bundleFd, int categories, Host host);
 
-    private static native int nativeSetRules(long handle, int blocklistFd, int bundleFd);
+    private static native int nativeSetRules(long handle, int blocklistFd, int bundleFd, int categories);
 
     private static native int nativePause(long handle, long millis);
 
