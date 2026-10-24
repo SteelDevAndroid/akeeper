@@ -19,7 +19,11 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 
-/** Toutes les méthodes s'exécutent sur le thread principal : aucun champ n'est partagé entre threads. */
+/**
+ * Toutes les méthodes s'exécutent sur le thread principal : aucun champ n'est partagé entre threads. Les rappels de
+ * {@link UpstreamDns}, qui arrivent sur un autre thread, y reviennent par {@code main}, sauf {@code followUnderlying}
+ * qui ne touche aucun champ.
+ */
 public final class ShieldVpnService extends VpnService {
 
     static final String DNS_V4 = "10.111.0.53";
@@ -27,6 +31,8 @@ public final class ShieldVpnService extends VpnService {
     /** Liste personnelle de domaines bloqués, un par ligne, dans {@code filesDir}. */
     public static final String BLOCKLIST_FILE = "blocklist.txt";
 
+    // Les rappels réseau de UpstreamDns arrivent sur leur propre thread : l'état du service reste au thread principal.
+    private final Handler main = new Handler(Looper.getMainLooper());
     private NativeEngine engine;
     private UpstreamDns upstream;
     private ShieldStatus.Subscription appRules;
@@ -94,8 +100,8 @@ public final class ShieldVpnService extends VpnService {
         // Planifiée ici et non dans l'UI : Always-on VPN démarre le service sans jamais ouvrir l'app.
         RuleUpdates.schedule(this);
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
-                this::followUnderlying, this::onPrivateDnsStrict);
-        upstream.start(new Handler(Looper.getMainLooper()));
+                this::followUnderlying, strict -> main.post(() -> onPrivateDnsStrict(strict)));
+        upstream.start();
         return true;
     }
 

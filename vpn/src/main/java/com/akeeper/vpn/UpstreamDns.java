@@ -6,6 +6,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.ParcelFileDescriptor;
 
 import com.akeeper.engine.NativeEngine;
@@ -20,7 +21,9 @@ import java.util.function.Consumer;
 
 /**
  * Suit le meilleur réseau non-VPN et confie au moteur un socket UDP protégé par résolveur DNS de ce réseau.
- * Toutes les méthodes s'exécutent sur le {@link Handler} passé à {@link #start}.
+ * Les rappels réseau tournent sur un thread dédié, jamais sur le thread principal : ouvrir et connecter un socket y
+ * lève {@code NetworkOnMainThreadException}. Les méthodes publiques sont synchronisées, car {@link #close} vient du
+ * thread principal pendant qu'un rappel peut être en cours.
  */
 final class UpstreamDns extends ConnectivityManager.NetworkCallback implements AutoCloseable {
 
@@ -36,6 +39,8 @@ final class UpstreamDns extends ConnectivityManager.NetworkCallback implements A
     private final Consumer<Network> onUnderlyingNetwork;
     private final Consumer<Boolean> onPrivateDnsStrict;
 
+    private HandlerThread thread;
+    private boolean closed;
     private Network appliedNetwork;
     private List<InetAddress> appliedServers = List.of();
 
@@ -48,7 +53,10 @@ final class UpstreamDns extends ConnectivityManager.NetworkCallback implements A
         this.onPrivateDnsStrict = onPrivateDnsStrict;
     }
 
-    void start(Handler handler) {
+    synchronized void start() {
+        thread = new HandlerThread("akeeper-upstream-dns");
+        thread.start();
+        var handler = new Handler(thread.getLooper());
         // NetworkRequest exclut les VPN par défaut (NOT_VPN) : on suit bien le réseau physique sous-jacent.
         var underlying = new NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -57,7 +65,10 @@ final class UpstreamDns extends ConnectivityManager.NetworkCallback implements A
     }
 
     @Override
-    public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+    public synchronized void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+        if (closed) {
+            return;
+        }
         // Un nom de serveur n'est présent qu'en mode strict : le système chiffre alors le DNS vers ce serveur
         // et ne passe plus par le résolveur local (spec §6, « DNS opaque »).
         onPrivateDnsStrict.accept(properties.getPrivateDnsServerName() != null);
@@ -65,16 +76,22 @@ final class UpstreamDns extends ConnectivityManager.NetworkCallback implements A
     }
 
     @Override
-    public void onLost(Network network) {
-        if (network.equals(appliedNetwork)) {
+    public synchronized void onLost(Network network) {
+        if (!closed && network.equals(appliedNetwork)) {
             apply(null, List.of());
         }
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
         connectivity.unregisterNetworkCallback(this);
         apply(null, List.of());
+        // Un rappel déjà en attente du verrou verra `closed` et ne rouvrira aucun socket.
+        closed = true;
+        thread.quitSafely();
     }
 
     /** Résolveurs utilisables : uniques, ni boucle locale ni adresse joker, au plus {@link NativeEngine#MAX_UPSTREAMS}. */
