@@ -1,6 +1,7 @@
 package com.akeeper.rules;
 
 import android.content.Context;
+import android.content.pm.PackageManager;
 
 import java.io.Closeable;
 import java.io.DataInputStream;
@@ -31,6 +32,28 @@ public final class RuleStore {
     private static final String BUNDLE = "bundle.akrb";
     private static final String FLOOR = "floor";
 
+    private static final String EMBEDDED_FILE = "embedded.akrb";
+    private static final String EMBEDDED_ASSET = "default-rules.akrb";
+
+    /** Liste livrée dans l'APK ; {@code updatedAt} (ms) date de l'installation de cette version de l'app. */
+    interface Embedded {
+        Embedded NONE = new Embedded() {
+            @Override
+            public InputStream open() throws IOException {
+                throw new FileNotFoundException("aucune liste intégrée");
+            }
+
+            @Override
+            public long updatedAt() {
+                return 0;
+            }
+        };
+
+        InputStream open() throws IOException;
+
+        long updatedAt();
+    }
+
     private static volatile RuleStore instance;
 
     private final File dir;
@@ -38,14 +61,16 @@ public final class RuleStore {
     private final File floor;
     private final BundleVerifier verifier;
     private final long embeddedFloor;
+    private final Embedded embedded;
     private final Set<Runnable> listeners = new CopyOnWriteArraySet<>();
 
-    RuleStore(File dir, BundleVerifier verifier, long embeddedFloor) {
+    RuleStore(File dir, BundleVerifier verifier, long embeddedFloor, Embedded embedded) {
         this.dir = dir;
         this.bundle = new File(dir, BUNDLE);
         this.floor = new File(dir, FLOOR);
         this.verifier = verifier;
         this.embeddedFloor = embeddedFloor;
+        this.embedded = embedded;
     }
 
     public static RuleStore get(Context context) {
@@ -55,8 +80,10 @@ public final class RuleStore {
                 current = instance;
                 if (current == null) {
                     // noBackupFilesDir : un bundle restauré d'une sauvegarde contournerait le plancher.
-                    var dir = new File(context.getApplicationContext().getNoBackupFilesDir(), DIR);
-                    current = new RuleStore(dir, BundleVerifier.embedded(), BuildConfig.MIN_RULE_VERSION);
+                    var app = context.getApplicationContext();
+                    var dir = new File(app.getNoBackupFilesDir(), DIR);
+                    current = new RuleStore(dir, BundleVerifier.embedded(), BuildConfig.MIN_RULE_VERSION,
+                            assets(app));
                     instance = current;
                 }
             }
@@ -117,6 +144,40 @@ public final class RuleStore {
         }
     }
 
+    /**
+     * Règles à donner au moteur : le bundle téléchargé s'il est valide, sinon la liste intégrée à l'APK. Seul le
+     * premier est signé ; la seconde est authentifiée par l'APK lui-même.
+     */
+    public Optional<Active> openRules() {
+        return openActive().or(this::openEmbedded);
+    }
+
+    private synchronized Optional<Active> openEmbedded() {
+        var copy = new File(dir, EMBEDDED_FILE);
+        try {
+            // Recopiée à chaque nouvelle version de l'app : l'asset n'est lisible qu'en flux, pas en descripteur.
+            if (!copy.isFile() || copy.lastModified() < embedded.updatedAt()) {
+                byte[] bytes;
+                try (var in = embedded.open()) {
+                    bytes = readBounded(in);
+                }
+                BundleVerifier.parse(bytes);
+                writeAtomically(copy, bytes);
+            }
+            var stream = new FileInputStream(copy);
+            try {
+                var header = BundleVerifier.parse(readBounded(stream));
+                stream.getChannel().position(0);
+                return Optional.of(new Active(header, stream));
+            } catch (IOException | GeneralSecurityException invalid) {
+                closeQuietly(stream);
+                return Optional.empty();
+            }
+        } catch (IOException | GeneralSecurityException unavailable) {
+            return Optional.empty();
+        }
+    }
+
     /** En-tête du bundle actif valide, sans garder le fichier ouvert. */
     public Optional<RuleBundle> active() {
         return openActive().map(active -> {
@@ -127,7 +188,7 @@ public final class RuleStore {
 
     /** Sources et licences du bundle actif, pour l'écran « Licences ». */
     public Optional<String> notice() {
-        try (var active = openActive().orElse(null)) {
+        try (var active = openRules().orElse(null)) {
             if (active == null) {
                 return Optional.empty();
             }
@@ -190,6 +251,24 @@ public final class RuleStore {
         try (var directory = FileChannel.open(dir.toPath(), StandardOpenOption.READ)) {
             directory.force(true);
         }
+    }
+
+    private static Embedded assets(Context context) {
+        return new Embedded() {
+            @Override
+            public InputStream open() throws IOException {
+                return context.getAssets().open(EMBEDDED_ASSET);
+            }
+
+            @Override
+            public long updatedAt() {
+                try {
+                    return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).lastUpdateTime;
+                } catch (PackageManager.NameNotFoundException unreachable) {
+                    return Long.MAX_VALUE;
+                }
+            }
+        };
     }
 
     private static void closeQuietly(Closeable closeable) {

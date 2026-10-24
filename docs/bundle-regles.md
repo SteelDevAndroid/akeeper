@@ -55,6 +55,15 @@ Au démarrage, `RuleStore.openActive` revérifie le fichier et cède au moteur l
 
 Plancher effectif : `max(akeeper.minRuleVersion embarqué dans l'APK, rules/floor)`. Il ne redescend jamais, même si le bundle est supprimé.
 
+## Liste intégrée à l'APK
+
+Sans bundle téléchargé valide, l'app donne au moteur `rules/src/main/assets/default-rules.akrb`, une liste HaGeZi LIGHT (70 390 domaines, catégorie publicité et traqueurs, licence GPL-3.0). Sans elle, une installation neuve ne filtrerait rien.
+- **Pas de signature Ed25519** : le fichier porte 64 octets nuls et sa version vaut 0. Son authenticité est celle de l'APK qui le contient, et `verify` le refuse, donc il ne peut jamais passer pour une mise à jour. Un bundle téléchargé, lui, est toujours vérifié.
+- **Priorité** : `RuleStore.openRules()` donne le bundle téléchargé s'il est valide, sinon la liste intégrée. Un téléchargement corrompu retombe donc sur elle.
+- **Copie** : l'asset n'est lisible qu'en flux, alors que le moteur veut un descripteur. Il est recopié de façon atomique dans `noBackupFilesDir/rules/embedded.akrb` à chaque nouvelle version de l'app seulement.
+- **Régénération** : `scripts/build-default-rules.sh` télécharge la liste (ou lit `LIGHT_LIST=<fichier>`) et appelle `akeeper-bundle build-unsigned`. Le texte `NOTICE` indique la source, la licence et la date, et alimente l'écran « Licences ».
+- **Test** : `the_shipped_default_list_blocks_ad_domains_and_spares_common_sites` charge ce fichier et vérifie qu'il bloque des domaines publicitaires sans toucher aux sites courants.
+
 ## Clés
 
 - Les deux clés publiques sont fournies par la propriété Gradle `akeeper.rulePublicKeys` (hex, séparées par une virgule), validée à la configuration puis injectée dans `BuildConfig`.

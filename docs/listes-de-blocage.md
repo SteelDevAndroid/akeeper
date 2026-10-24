@@ -105,3 +105,9 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 - [StevenBlack/hosts](https://github.com/StevenBlack/hosts) et en-têtes de sources du fichier `hosts`
 - [URLhaus Community API](https://urlhaus.abuse.ch/api/) et [conditions d'utilisation d'abuse.ch](https://abuse.ch/terms-of-use/)
 - [Phishing Army, usage et licence](https://phishing.army/license/) et [SOURCES.md](https://github.com/drego85/PhishingArmyCore/blob/master/SOURCES.md)
+
+## Liste intégrée (23-24 octobre 2026)
+
+HaGeZi LIGHT est livrée dans l'APK (`rules/src/main/assets/default-rules.akrb`, voir `docs/bundle-regles.md`), afin que l'app filtre dès l'installation sans serveur de règles.
+- **Phishing Army et URLhaus ne sont pas intégrées** : la licence de Phishing Army reste à revoir avant la publication, et URLhaus exige l'accord écrit et une clé qui reste un secret du pipeline serveur. Elles arriveront avec les bundles signés.
+- **Mise à jour** : tant qu'aucun serveur de règles n'existe, la liste ne change qu'avec une nouvelle version de l'app (`scripts/build-default-rules.sh`).

@@ -50,6 +50,21 @@ pub fn build(
     created_at: u64,
     sources: &Sources,
 ) -> Result<Vec<u8>, Error> {
+    let mut bytes = message(key_id, version, created_at, sources)?;
+    let signature = key.sign(&bytes);
+    bytes.extend_from_slice(&signature.to_bytes());
+    Ok(bytes)
+}
+
+/// Bundle sans signature (64 octets nuls), pour la liste intégrée à l'APK : son authenticité vient de la signature
+/// de l'APK. L'app ne l'active jamais comme une mise à jour : `verify` le refuse, la version 0 n'avance pas le plancher.
+pub fn build_unsigned(created_at: u64, sources: &Sources) -> Result<Vec<u8>, Error> {
+    let mut bytes = message(0, 0, created_at, sources)?;
+    bytes.extend_from_slice(&[0; bundle::SIGNATURE_LEN]);
+    Ok(bytes)
+}
+
+fn message(key_id: u8, version: u64, created_at: u64, sources: &Sources) -> Result<Vec<u8>, Error> {
     let lists: Vec<(u8, Blocklist)> = [
         (category::ADS, &sources.ads),
         (category::MALWARE, &sources.malware),
@@ -83,10 +98,9 @@ pub fn build(
             data: notice.as_bytes(),
         });
     }
-    let mut bytes = bundle::signed_message(key_id, version, created_at, &sections)?;
-    let signature = key.sign(&bytes);
-    bytes.extend_from_slice(&signature.to_bytes());
-    Ok(bytes)
+    Ok(bundle::signed_message(
+        key_id, version, created_at, &sections,
+    )?)
 }
 
 /// Contrôle du pipeline avant publication : signature par la clé désignée par `key_id`, comme dans l'app, puis
@@ -191,6 +205,21 @@ mod tests {
         let mut tampered = bytes.clone();
         tampered[20] ^= 1;
         assert!(verify(&tampered, &[other, key.verifying_key()]).is_err());
+    }
+
+    #[test]
+    fn an_unsigned_bundle_loads_in_the_engine_but_never_verifies() {
+        let bytes = build_unsigned(1_761_220_000, &fixture_sources()).unwrap();
+        assert_eq!(BundleRules::parse(&bytes).unwrap().version(), 0);
+        let key = signing_key(&TEST_SEED).verifying_key();
+        assert!(matches!(
+            verify(&bytes, &[key, key]),
+            Err(Error::BadSignature)
+        ));
+        assert_eq!(
+            &bytes[bytes.len() - bundle::SIGNATURE_LEN..],
+            &[0; bundle::SIGNATURE_LEN]
+        );
     }
 
     #[test]

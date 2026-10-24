@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
 import java.util.List;
@@ -32,7 +33,8 @@ class RuleStoreTest {
     }
 
     private RuleStore newStore(long embeddedFloor) {
-        return new RuleStore(new File(dir, "rules"), new BundleVerifier(List.of(key.getPublicKey())), embeddedFloor);
+        return new RuleStore(new File(dir, "rules"), new BundleVerifier(List.of(key.getPublicKey())), embeddedFloor,
+                RuleStore.Embedded.NONE);
     }
 
     private RuleBundle install(long version) throws IOException, GeneralSecurityException {
@@ -97,5 +99,81 @@ class RuleStoreTest {
         }
         install(2);
         assertThat(calls).hasValue(1);
+    }
+
+    /** Liste intégrée de test : le fixture partagé avec Rust, dont la signature n'est pas vérifiée ici. */
+    private RuleStore storeWithEmbedded(byte[] bytes, long updatedAt, AtomicInteger opened) {
+        var embedded = new RuleStore.Embedded() {
+            @Override
+            public InputStream open() {
+                opened.incrementAndGet();
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public long updatedAt() {
+                return updatedAt;
+            }
+        };
+        return new RuleStore(new File(dir, "rules"), new BundleVerifier(List.of(key.getPublicKey())), 0, embedded);
+    }
+
+    private byte[] fixture() throws IOException {
+        try (var in = getClass().getResourceAsStream("fixture-v5.akrb")) {
+            return in.readAllBytes();
+        }
+    }
+
+    @Test
+    void fallsBackOnTheEmbeddedListWhenNothingWasDownloaded() throws Exception {
+        var store = storeWithEmbedded(fixture(), 0, new AtomicInteger());
+
+        try (var rules = store.openRules().orElseThrow()) {
+            assertThat(rules.stream().readNBytes(4)).containsExactly(BundleVerifier.MAGIC);
+        }
+        assertThat(store.active()).as("« active » ne désigne que le bundle téléchargé").isEmpty();
+        assertThat(store.notice()).contains("Listes de test, domaine public.");
+    }
+
+    @Test
+    void aDownloadedBundleReplacesTheEmbeddedList() throws Exception {
+        var store = storeWithEmbedded(fixture(), 0, new AtomicInteger());
+        store.install(new ByteArrayInputStream(TestBundles.signed(key, 0, 9, 0)));
+
+        try (var rules = store.openRules().orElseThrow()) {
+            assertThat(rules.bundle().version()).isEqualTo(9);
+        }
+        assertThat(store.notice()).contains("test");
+    }
+
+    @Test
+    void aCorruptedDownloadFallsBackOnTheEmbeddedList() throws Exception {
+        var store = storeWithEmbedded(fixture(), 0, new AtomicInteger());
+        store.install(new ByteArrayInputStream(TestBundles.signed(key, 0, 9, 0)));
+        Files.write(new File(dir, "rules/bundle.akrb").toPath(), new byte[]{'A', 'K', 'R', 'B'});
+
+        try (var rules = store.openRules().orElseThrow()) {
+            assertThat(rules.bundle().version()).isEqualTo(5);
+        }
+    }
+
+    @Test
+    void copiesTheEmbeddedListOnlyWhenTheAppWasUpdated() throws Exception {
+        var opened = new AtomicInteger();
+        var store = storeWithEmbedded(fixture(), 0, opened);
+
+        store.openRules().orElseThrow().close();
+        store.openRules().orElseThrow().close();
+        assertThat(opened).as("copiée une seule fois").hasValue(1);
+
+        var updated = storeWithEmbedded(fixture(), System.currentTimeMillis() + 60_000, opened);
+        updated.openRules().orElseThrow().close();
+        assertThat(opened).as("recopiée après une mise à jour de l'app").hasValue(2);
+    }
+
+    @Test
+    void ignoresAnUnreadableEmbeddedList() {
+        assertThat(storeWithEmbedded(new byte[]{1, 2, 3}, 0, new AtomicInteger()).openRules()).isEmpty();
+        assertThat(newStore(0).openRules()).isEmpty();
     }
 }

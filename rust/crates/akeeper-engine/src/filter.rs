@@ -311,6 +311,27 @@ pub(crate) mod tests {
         assert!(filter.blocks("mine.example"));
     }
 
+    /// La liste livrée dans l'APK : elle doit se charger et bloquer sans fausse alerte sur les sites courants.
+    #[test]
+    fn the_shipped_default_list_blocks_ad_domains_and_spares_common_sites() {
+        let bytes = include_bytes!("../../../../rules/src/main/assets/default-rules.akrb");
+        let rules = BundleRules::parse(bytes).unwrap();
+        assert_eq!(rules.version(), 0);
+        let filter = Filter::new(Blocklist::empty(), Some(rules));
+        assert!(filter.blocks("googlesyndication.com"));
+        assert!(filter.blocks("pagead2.googlesyndication.com"));
+        for site in [
+            "example.org",
+            "wikipedia.org",
+            "github.com",
+            "www.google.com",
+            "mozilla.org",
+            "lemonde.fr",
+        ] {
+            assert!(!filter.blocks(site), "{site} ne doit pas être bloqué");
+        }
+    }
+
     #[test]
     fn prefix_zero_matches_everything() {
         assert!(Cidr::new(0, 0).contains(u128::MAX));

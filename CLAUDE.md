@@ -30,7 +30,7 @@ Layout:
   - Also: the spec's `ShieldPolicy`, `LockdownStatus`, `FlowOwnerResolver` and `com.akeeper.security.AdvancedProtectionPolicy`.
 - `rules/`: signed rule bundles (`docs/bundle-regles.md`).
   - `BundleVerifier` checks the envelope and the Ed25519 signature, with the key chosen by `key_id` among the keys of the `akeeper.rulePublicKeys` Gradle property. With no key, no bundle is accepted.
-  - `RuleStore` keeps `noBackupFilesDir/rules/bundle.akrb` and a persistent anti-rollback floor, never below `akeeper.minRuleVersion`. Activation is atomic and requires a strictly newer version. `openActive()` re-verifies the file and hands the same descriptor to the engine.
+  - `RuleStore` keeps `noBackupFilesDir/rules/bundle.akrb` and a persistent anti-rollback floor, never below `akeeper.minRuleVersion`. Activation is atomic and requires a strictly newer version. `openActive()` re-verifies the file and hands the same descriptor to the engine. `openRules()` is what the service uses: the downloaded bundle if valid, else the default list shipped in the APK (`assets/default-rules.akrb`, HaGeZi LIGHT, copied to `embedded.akrb`). That list is **unsigned** (64 zero bytes, version 0), trusted because the APK is, and `verify` rejects it; regenerate it with `scripts/build-default-rules.sh`.
   - `RuleUpdateWorker` runs every 12 h through WorkManager with a conditional GET on `akeeper.rulesUrl`; nothing is scheduled without a URL. The service schedules it and calls `NativeEngine.setRules` after each activation.
 - `engine/`: `NativeEngine` (JNI). The `cargoNdk<Variant>` task builds `rust/` and feeds the `.so` to the variant's `jniLibs`.
 - `rust/`:
@@ -65,7 +65,7 @@ The personal blocklist is `filesDir/blocklist.txt`, one domain per line, read at
 
 JNI contract:
 - `nativeStart(tunFd, blocklistFd, bundleFd, host)`, `nativeSetRules(handle, blocklistFd, bundleFd)`, `nativePause(handle, millis)`, `nativeSetUpstream(handle, slot, fd)`, `nativeSetBlockedUids(handle, int[])`, `nativeCounter(handle, index)`, `nativeStop(handle)`. The engine owns and closes every fd it is given (-1 means absent).
-- An unreadable personal blocklist makes `nativeStart` fail. An unreadable bundle is skipped at start, because the anti-rollback floor would otherwise keep protection off until the next bundle; `nativeSetRules` returns -1 and keeps the current rules. The bundle fd must come from `RuleStore.openActive()`, because the engine does not check signatures.
+- An unreadable personal blocklist makes `nativeStart` fail. An unreadable bundle is skipped at start, because the anti-rollback floor would otherwise keep protection off until the next bundle; `nativeSetRules` returns -1 and keeps the current rules. The bundle fd must come from `RuleStore.openRules()`, because the engine does not check signatures.
 - `host` is a `NativeEngine.Host` held as a global ref. The engine thread stays attached to the JVM and calls it: `protect(int)` per socket, and `ownerUid(...)` once per new flow (`FlowOwnerResolver`, uncached).
 - Every callback runs inside a JNI local frame, because that thread never returns to Java and local refs would leak.
 - The R8 keep rules are in `engine/consumer-rules.pro`.

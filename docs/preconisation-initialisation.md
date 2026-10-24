@@ -93,6 +93,11 @@ Pas encore livrés :
 - **Écart avec « tout autoriser »** : le pare-feu par app reste actif, car c'est un choix explicite de l'utilisateur. La neutralisation de l'évasion reste active elle aussi (NODATA type 65, canari DoH, QUIC, DoT), sans quoi le DNS privé « automatique » ne se replierait plus.
 - **Limites** : un redémarrage du service annule la pause, ce qui rétablit la protection. La notification permanente et la tuile des réglages rapides n'ont pas encore d'action Pause.
 
+**Liste par défaut intégrée** : sans elle, l'app annonçait « Protégé » sans rien bloquer, hors points d'accès DoH.
+- HaGeZi LIGHT est livrée dans l'APK, sous la forme d'un bundle sans signature (version 0), et le moteur la reçoit quand aucun bundle téléchargé n'est valide.
+- **Écart n°7** : cette liste n'est pas signée Ed25519, son authenticité est celle de l'APK. Elle ne peut pas servir de mise à jour, et les bundles téléchargés restent tous vérifiés.
+- Phishing Army et URLhaus restent à intégrer avec les bundles signés (licence et accord à régler).
+
 Restent pour J5 :
 - **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
 - **Pinning TLS** du serveur de règles.

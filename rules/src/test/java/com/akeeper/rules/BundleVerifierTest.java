@@ -58,6 +58,16 @@ class BundleVerifierTest {
     }
 
     @Test
+    void parsesTheEnvelopeWithoutCheckingTheSignature() throws GeneralSecurityException {
+        var unsigned = TestBundles.signed(first, 0, 4, 77);
+        Arrays.fill(unsigned, unsigned.length - BundleVerifier.SIGNATURE_LEN, unsigned.length, (byte) 0);
+
+        assertThat(BundleVerifier.parse(unsigned)).isEqualTo(new RuleBundle(0, 4, 77));
+        assertThatThrownBy(() -> verifier.verify(unsigned)).isInstanceOf(GeneralSecurityException.class);
+        assertThatThrownBy(() -> BundleVerifier.parse(new byte[10])).isInstanceOf(GeneralSecurityException.class);
+    }
+
+    @Test
     void selectsTheKeyNamedInTheHeader() throws GeneralSecurityException {
         assertThat(verifier.verify(TestBundles.signed(second, 1, 3, 0)).version()).isEqualTo(3);
         // key_id 0 désigne la première clé : la seconde ne peut pas signer en son nom.

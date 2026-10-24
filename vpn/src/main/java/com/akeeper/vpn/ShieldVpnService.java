@@ -204,9 +204,9 @@ public final class ShieldVpnService extends VpnService {
         }
     }
 
-    /** Bundle vérifié, cédé au moteur ; -1 sans bundle valide (liste personnelle et repli DoH embarqué seuls). */
+    /** Règles cédées au moteur : bundle signé, sinon liste intégrée à l'APK ; -1 si aucune n'est lisible. */
     private static int openBundle(RuleStore rules) {
-        return rules.openActive().map(active -> {
+        return rules.openRules().map(active -> {
             try (active) {
                 // dup() partage la position du flux, laissée au début du fichier par openActive().
                 return ParcelFileDescriptor.dup(active.stream().getFD()).detachFd();
