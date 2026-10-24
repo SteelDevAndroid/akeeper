@@ -125,6 +125,18 @@ public final class RuleStore {
         });
     }
 
+    /** Sources et licences du bundle actif, pour l'écran « Licences ». */
+    public Optional<String> notice() {
+        try (var active = openActive().orElse(null)) {
+            if (active == null) {
+                return Optional.empty();
+            }
+            return BundleVerifier.notice(readBounded(active.stream()));
+        } catch (IOException unreadable) {
+            return Optional.empty();
+        }
+    }
+
     /** L'observateur est appelé après chaque activation, sur le thread de la mise à jour. */
     public Subscription observe(Runnable listener) {
         listeners.add(listener);

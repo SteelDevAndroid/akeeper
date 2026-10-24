@@ -20,6 +20,7 @@ android {
 dependencies {
     implementation(project(":vpn"))
     implementation(project(":engine"))
+    implementation(project(":rules"))
     implementation(libs.material)
     implementation(libs.recyclerview)
 }

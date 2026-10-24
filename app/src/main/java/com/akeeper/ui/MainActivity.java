@@ -34,13 +34,14 @@ import java.io.File;
 import java.io.IOException;
 import java.text.NumberFormat;
 
-/** Activité unique : onboarding (O1 à O4) puis onglets Accueil (A1) et Apps (A2). Thread principal uniquement. */
+/** Activité unique : onboarding (O1 à O4), onglets Accueil (A1) et Apps (A2), puis Réglages (R1). Thread principal uniquement. */
 public final class MainActivity extends AppCompatActivity {
 
     private static final String STATE_DISCLOSURE = "disclosure_accepted";
     private static final String STATE_NOTIFICATIONS_ASKED = "notifications_asked";
     private static final String STATE_CONSENT_REFUSED = "consent_refused";
     private static final String STATE_APPS_TAB = "apps_tab";
+    private static final String STATE_SETTINGS = "settings_open";
     // Marqueur dans noBackupFilesDir : jamais sauvegardé ni transféré, aucune donnée sensible.
     private static final String ONBOARDING_MARKER = "onboarding_done";
     private static final int ONBOARDING_STEPS = 4;
@@ -68,12 +69,18 @@ public final class MainActivity extends AppCompatActivity {
     private Step shown;
     private int shownLayout;
     private boolean appsTab;
+    private boolean settingsOpen;
     private AppsScreen appsScreen;
-    // Retour depuis l'onglet Apps : revient à l'accueil au lieu de quitter l'app.
+    private SettingsScreen settingsScreen;
+    // Retour depuis les Réglages ou l'onglet Apps : revient en arrière au lieu de quitter l'app.
     private final OnBackPressedCallback backToHome = new OnBackPressedCallback(false) {
         @Override
         public void handleOnBackPressed() {
-            selectTab(false);
+            if (settingsOpen) {
+                setSettingsOpen(false);
+            } else {
+                selectTab(false);
+            }
         }
     };
     private ShieldStatus.Subscription subscription;
@@ -87,6 +94,7 @@ public final class MainActivity extends AppCompatActivity {
             notificationsAsked = savedInstanceState.getBoolean(STATE_NOTIFICATIONS_ASKED);
             consentRefused = savedInstanceState.getBoolean(STATE_CONSENT_REFUSED);
             appsTab = savedInstanceState.getBoolean(STATE_APPS_TAB);
+            settingsOpen = savedInstanceState.getBoolean(STATE_SETTINGS);
         }
     }
 
@@ -97,6 +105,7 @@ public final class MainActivity extends AppCompatActivity {
         outState.putBoolean(STATE_NOTIFICATIONS_ASKED, notificationsAsked);
         outState.putBoolean(STATE_CONSENT_REFUSED, consentRefused);
         outState.putBoolean(STATE_APPS_TAB, appsTab);
+        outState.putBoolean(STATE_SETTINGS, settingsOpen);
     }
 
     @Override
@@ -125,8 +134,8 @@ public final class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         subscription.close();
-        closeAppsScreen();
-        // Force la reconstruction de l'écran au retour : l'écran Apps vient d'être libéré.
+        closeScreens();
+        // Force la reconstruction de l'écran au retour : les écrans Apps et Réglages viennent d'être libérés.
         shownLayout = 0;
         super.onStop();
     }
@@ -139,29 +148,36 @@ public final class MainActivity extends AppCompatActivity {
             markOnboardingDone(marker);
         }
         int layout = step != Step.HOME ? R.layout.screen_onboarding
+                : settingsOpen ? R.layout.screen_settings
                 : appsTab ? R.layout.screen_apps : R.layout.screen_home;
         if (layout != shownLayout) {
-            closeAppsScreen();
+            closeScreens();
             setContentView(layout);
             View root = findViewById(R.id.root);
             applySystemBarInsets(root);
             shownLayout = layout;
-            if (step == Step.HOME) {
+            if (layout == R.layout.screen_home || layout == R.layout.screen_apps) {
                 bindBottomNav();
+                findViewById(R.id.settings_button).setOnClickListener(v -> setSettingsOpen(true));
             }
             if (layout == R.layout.screen_apps) {
                 appsScreen = new AppsScreen(this, root);
             }
+            if (layout == R.layout.screen_settings) {
+                settingsScreen = new SettingsScreen(this, root, () -> setSettingsOpen(false));
+            }
         }
         shown = step;
-        backToHome.setEnabled(step == Step.HOME && appsTab);
+        backToHome.setEnabled(step == Step.HOME && (appsTab || settingsOpen));
         switch (step) {
             case DISCLOSURE -> renderDisclosure();
             case VPN_CONSENT -> renderConsent();
             case NOTIFICATIONS -> renderNotifications();
             case LOCKDOWN -> renderLockdown();
             case HOME -> {
-                if (!appsTab) {
+                if (settingsOpen) {
+                    settingsScreen.refresh();
+                } else if (!appsTab) {
                     renderHome();
                 }
             }
@@ -184,10 +200,19 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void closeAppsScreen() {
+    private void setSettingsOpen(boolean open) {
+        settingsOpen = open;
+        render();
+    }
+
+    private void closeScreens() {
         if (appsScreen != null) {
             appsScreen.close();
             appsScreen = null;
+        }
+        if (settingsScreen != null) {
+            settingsScreen.close();
+            settingsScreen = null;
         }
     }
 

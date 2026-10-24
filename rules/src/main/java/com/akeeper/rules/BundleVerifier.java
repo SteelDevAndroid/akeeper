@@ -3,10 +3,12 @@ package com.akeeper.rules;
 import com.google.crypto.tink.subtle.Ed25519Verify;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Vérifie l'enveloppe et la signature Ed25519 d'un bundle avant toute activation. Le moteur natif relit ensuite
@@ -21,6 +23,8 @@ public final class BundleVerifier {
     /** Même borne que {@code akeeper_proto::bundle::MAX_BUNDLE}. */
     public static final int MAX_BUNDLE = 32 * 1024 * 1024;
     private static final int PUBLIC_KEY_LEN = 32;
+    private static final int SECTION_HEADER = 8;
+    private static final int KIND_NOTICE = 3;
 
     // Indexé par key_id : la rotation ajoute la clé suivante sans retirer celle qui signe encore.
     private final List<Ed25519Verify> keys;
@@ -39,6 +43,31 @@ public final class BundleVerifier {
         var keys = text.isEmpty() ? List.<byte[]>of()
                 : Arrays.stream(text.split(",")).map(HexFormat.of()::parseHex).toList();
         return new BundleVerifier(keys);
+    }
+
+    /**
+     * Texte {@code NOTICE} (sources et licences) d'un bundle <b>déjà vérifié</b>. Les sections ont été bornées par
+     * {@link #verify} ; un découpage incohérent donne simplement un texte absent.
+     */
+    public static Optional<String> notice(byte[] verifiedBundle) {
+        int offset = HEADER_LEN;
+        int end = verifiedBundle.length - SIGNATURE_LEN;
+        while (offset + SECTION_HEADER <= end) {
+            var header = ByteBuffer.wrap(verifiedBundle, offset, SECTION_HEADER);
+            int kind = Byte.toUnsignedInt(header.get());
+            header.get();
+            header.getShort();
+            long length = Integer.toUnsignedLong(header.getInt());
+            offset += SECTION_HEADER;
+            if (length > end - offset) {
+                return Optional.empty();
+            }
+            if (kind == KIND_NOTICE) {
+                return Optional.of(new String(verifiedBundle, offset, (int) length, StandardCharsets.UTF_8));
+            }
+            offset += (int) length;
+        }
+        return Optional.empty();
     }
 
     public RuleBundle verify(byte[] bundle) throws GeneralSecurityException {

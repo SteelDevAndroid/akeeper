@@ -13,9 +13,10 @@ aKeeper is a no-root Android firewall / DNS filter built on `VpnService` (local 
 - Package is `com.akeeper` (lowercase, approved).
 
 Layout:
-- `app/`: `ui.MainActivity`, the only Activity. It shows onboarding O1–O4, then the Home (A1) and Apps (A2) tabs, with no Fragments.
+- `app/`: `ui.MainActivity`, the only Activity. It shows onboarding O1–O4, then the Home (A1) and Apps (A2) tabs and the Settings screen (R1), with no Fragments.
   - `AppsScreen` loads apps through `AppCatalog` on a worker thread. The list comes from `QUERY_ALL_PACKAGES` (approved, needs a Play declaration), filtered to apps requesting INTERNET.
   - Toggling an app writes `AppRules`; apps that share a UID are toggled together, because the engine blocks by UID.
+  - `SettingsScreen` (R1) shows the rules version/date with an update-now button (only when `akeeper.rulesUrl` is set), the lockdown state, the battery guide for the OEMs in `OemGuide`, and R3 and Licences as dialogs. The Licences dialog shows the `NOTICE` of the verified active bundle. Settings with nothing behind them (LAN, logs, categories) are not shown yet.
   - The onboarding step is derived from system state by `OnboardingFlow` (VPN consent, notification permission, `LockdownStatus`); nothing is persisted except a `noBackupFilesDir/onboarding_done` marker.
   - The home state comes from `HomeState.of(ShieldStatus.Snapshot)`.
 - `vpn/`:
