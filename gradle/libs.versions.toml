@@ -8,6 +8,7 @@ work = "2.11.2"
 junit = "5.14.4"
 mockito = "5.24.0"
 assertj = "3.27.7"
+robolectric = "4.17"
 
 [libraries]
 android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
@@ -17,8 +18,11 @@ tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "
 work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit4 = { module = "junit:junit", version = "4.13.2" }
+junit-vintage-engine = { module = "org.junit.vintage:junit-vintage-engine" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
 [plugins]

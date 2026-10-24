@@ -113,4 +113,9 @@
     <string name="battery_steps_honor">Dans « Lancement d\'apps », désactivez la gestion automatique d\'aKeeper et autorisez le démarrage automatique.</string>
     <string name="battery_open">Ouvrir les réglages</string>
     <string name="battery_done">Terminer</string>
+
+    <string name="crash_title">aKeeper s\'est arrêté la dernière fois</string>
+    <string name="crash_intro">Voici la cause relevée. Rien n\'a été envoyé : copiez ce texte pour le transmettre.</string>
+    <string name="crash_copy">Copier</string>
+    <string name="crash_copied">Texte copié</string>
 </resources>
