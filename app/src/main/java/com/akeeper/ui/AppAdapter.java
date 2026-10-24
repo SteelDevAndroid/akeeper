@@ -16,18 +16,21 @@ import com.google.android.material.materialswitch.MaterialSwitch;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 final class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
     private final PackageManager packageManager;
     /** (app, accès Internet souhaité) */
     private final BiConsumer<AppEntry, Boolean> onToggle;
+    private final Consumer<AppEntry> onOpen;
     private List<AppEntry> apps = List.of();
     private Set<String> blocked = Set.of();
 
-    AppAdapter(PackageManager packageManager, BiConsumer<AppEntry, Boolean> onToggle) {
+    AppAdapter(PackageManager packageManager, BiConsumer<AppEntry, Boolean> onToggle, Consumer<AppEntry> onOpen) {
         this.packageManager = packageManager;
         this.onToggle = onToggle;
+        this.onOpen = onOpen;
     }
 
     @SuppressWarnings("NotifyDataSetChanged") // Liste filtrée recalculée en bloc : quelques centaines d'éléments.
@@ -66,6 +69,7 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         holder.toggle.setChecked(allowed);
         holder.toggle.setContentDescription(context.getString(R.string.apps_toggle_description, app.label()));
         holder.toggle.setOnCheckedChangeListener((button, checked) -> onToggle.accept(app, checked));
+        holder.itemView.setOnClickListener(v -> onOpen.accept(app));
     }
 
     static final class Holder extends RecyclerView.ViewHolder {

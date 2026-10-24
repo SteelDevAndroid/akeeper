@@ -43,11 +43,20 @@ import java.util.Date;
 /** Activité unique : onboarding (O1 à O4), onglets Accueil (A1) et Apps (A2), puis Réglages (R1). Thread principal uniquement. */
 public final class MainActivity extends AppCompatActivity {
 
+    private enum Tab {
+        HOME, APPS, ACTIVITY;
+
+        static Tab of(int ordinal) {
+            return ordinal >= 0 && ordinal < values().length ? values()[ordinal] : HOME;
+        }
+    }
+
     private static final String STATE_DISCLOSURE = "disclosure_accepted";
     private static final String STATE_NOTIFICATIONS_ASKED = "notifications_asked";
     private static final String STATE_CONSENT_REFUSED = "consent_refused";
-    private static final String STATE_APPS_TAB = "apps_tab";
+    private static final String STATE_TAB = "tab";
     private static final String STATE_SETTINGS = "settings_open";
+    private static final String STATE_LISTS = "lists_open";
     // Marqueur dans noBackupFilesDir : jamais sauvegardé ni transféré, aucune donnée sensible.
     private static final String ONBOARDING_MARKER = "onboarding_done";
     private static final int ONBOARDING_STEPS = 4;
@@ -74,18 +83,23 @@ public final class MainActivity extends AppCompatActivity {
     private boolean consentRefused;
     private Step shown;
     private int shownLayout;
-    private boolean appsTab;
+    private Tab tab = Tab.HOME;
     private boolean settingsOpen;
+    private boolean listsOpen;
     private AppsScreen appsScreen;
+    private ActivityScreen activityScreen;
     private SettingsScreen settingsScreen;
+    private ListsScreen listsScreen;
     // Retour depuis les Réglages ou l'onglet Apps : revient en arrière au lieu de quitter l'app.
     private final OnBackPressedCallback backToHome = new OnBackPressedCallback(false) {
         @Override
         public void handleOnBackPressed() {
-            if (settingsOpen) {
+            if (listsOpen) {
+                setListsOpen(false);
+            } else if (settingsOpen) {
                 setSettingsOpen(false);
             } else {
-                selectTab(false);
+                selectTab(Tab.HOME);
             }
         }
     };
@@ -102,8 +116,9 @@ public final class MainActivity extends AppCompatActivity {
             disclosureAccepted = savedInstanceState.getBoolean(STATE_DISCLOSURE);
             notificationsAsked = savedInstanceState.getBoolean(STATE_NOTIFICATIONS_ASKED);
             consentRefused = savedInstanceState.getBoolean(STATE_CONSENT_REFUSED);
-            appsTab = savedInstanceState.getBoolean(STATE_APPS_TAB);
+            tab = Tab.of(savedInstanceState.getInt(STATE_TAB));
             settingsOpen = savedInstanceState.getBoolean(STATE_SETTINGS);
+            listsOpen = savedInstanceState.getBoolean(STATE_LISTS);
         }
     }
 
@@ -113,8 +128,9 @@ public final class MainActivity extends AppCompatActivity {
         outState.putBoolean(STATE_DISCLOSURE, disclosureAccepted);
         outState.putBoolean(STATE_NOTIFICATIONS_ASKED, notificationsAsked);
         outState.putBoolean(STATE_CONSENT_REFUSED, consentRefused);
-        outState.putBoolean(STATE_APPS_TAB, appsTab);
+        outState.putInt(STATE_TAB, tab.ordinal());
         outState.putBoolean(STATE_SETTINGS, settingsOpen);
+        outState.putBoolean(STATE_LISTS, listsOpen);
     }
 
     @Override
@@ -188,36 +204,46 @@ public final class MainActivity extends AppCompatActivity {
             markOnboardingDone(marker);
         }
         int layout = step != Step.HOME ? R.layout.screen_onboarding
+                : listsOpen ? R.layout.screen_lists
                 : settingsOpen ? R.layout.screen_settings
-                : appsTab ? R.layout.screen_apps : R.layout.screen_home;
+                : tab == Tab.APPS ? R.layout.screen_apps
+                : tab == Tab.ACTIVITY ? R.layout.screen_activity : R.layout.screen_home;
         if (layout != shownLayout) {
             closeScreens();
             setContentView(layout);
             View root = findViewById(R.id.root);
             applySystemBarInsets(root);
             shownLayout = layout;
-            if (layout == R.layout.screen_home || layout == R.layout.screen_apps) {
+            if (layout == R.layout.screen_home || layout == R.layout.screen_apps || layout == R.layout.screen_activity) {
                 bindBottomNav();
                 findViewById(R.id.settings_button).setOnClickListener(v -> setSettingsOpen(true));
             }
             if (layout == R.layout.screen_apps) {
                 appsScreen = new AppsScreen(this, root);
             }
+            if (layout == R.layout.screen_activity) {
+                activityScreen = new ActivityScreen(this, root);
+            }
             if (layout == R.layout.screen_settings) {
-                settingsScreen = new SettingsScreen(this, root, () -> setSettingsOpen(false));
+                settingsScreen = new SettingsScreen(this, root, () -> setSettingsOpen(false), () -> setListsOpen(true));
+            }
+            if (layout == R.layout.screen_lists) {
+                listsScreen = new ListsScreen(this, root, () -> setListsOpen(false));
             }
         }
         shown = step;
-        backToHome.setEnabled(step == Step.HOME && (appsTab || settingsOpen));
+        backToHome.setEnabled(step == Step.HOME && (tab != Tab.HOME || settingsOpen || listsOpen));
         switch (step) {
             case DISCLOSURE -> renderDisclosure();
             case VPN_CONSENT -> renderConsent();
             case NOTIFICATIONS -> renderNotifications();
             case LOCKDOWN -> renderLockdown();
             case HOME -> {
-                if (settingsOpen) {
+                if (listsOpen) {
+                    // Les listes se tiennent à jour seules, par leurs observateurs.
+                } else if (settingsOpen) {
                     settingsScreen.refresh();
-                } else if (!appsTab) {
+                } else if (tab == Tab.HOME) {
                     renderHome();
                 }
             }
@@ -226,16 +252,21 @@ public final class MainActivity extends AppCompatActivity {
 
     private void bindBottomNav() {
         BottomNavigationView nav = findViewById(R.id.bottom_nav);
-        nav.setSelectedItemId(appsTab ? R.id.nav_apps : R.id.nav_home);
+        nav.setSelectedItemId(switch (tab) {
+            case APPS -> R.id.nav_apps;
+            case ACTIVITY -> R.id.nav_activity;
+            case HOME -> R.id.nav_home;
+        });
         nav.setOnItemSelectedListener(item -> {
-            selectTab(item.getItemId() == R.id.nav_apps);
+            selectTab(item.getItemId() == R.id.nav_apps ? Tab.APPS
+                    : item.getItemId() == R.id.nav_activity ? Tab.ACTIVITY : Tab.HOME);
             return true;
         });
     }
 
-    private void selectTab(boolean apps) {
-        if (apps != appsTab) {
-            appsTab = apps;
+    private void selectTab(Tab selected) {
+        if (selected != tab) {
+            tab = selected;
             render();
         }
     }
@@ -245,14 +276,27 @@ public final class MainActivity extends AppCompatActivity {
         render();
     }
 
+    private void setListsOpen(boolean open) {
+        listsOpen = open;
+        render();
+    }
+
     private void closeScreens() {
         if (appsScreen != null) {
             appsScreen.close();
             appsScreen = null;
         }
+        if (activityScreen != null) {
+            activityScreen.close();
+            activityScreen = null;
+        }
         if (settingsScreen != null) {
             settingsScreen.close();
             settingsScreen = null;
+        }
+        if (listsScreen != null) {
+            listsScreen.close();
+            listsScreen = null;
         }
     }
 

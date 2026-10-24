@@ -168,6 +168,7 @@ Cet écran n'est affiché que si `Build.MANUFACTURER` fait partie des OEM du gui
 - Section **Activité récente** : domaines contactés, avec un compteur et le verdict par domaine. Toucher un domaine ouvre A5.
 - Section **Données** : volume sur 24 h et 7 jours.
 - Hors MVP : règles distinctes Wi-Fi / données mobiles.
+- Section Données livrée : volumes 24 h et 7 jours, comptés par le moteur journal actif.
 
 ### A4 — Activité
 
@@ -176,6 +177,8 @@ Cet écran n'est affiché que si `Build.MANUFACTURER` fait partie des OEM du gui
 - Une recherche par domaine.
 - Pied de liste : « Historique conservé 7 jours sur cet appareil ».
 - Si le journal est désactivé (R1), l'état vide affiche « Journal désactivé » avec le bouton **Activer**.
+
+Livré : groupement par heure, sélecteur d'app et un résumé « bloqués depuis minuit » sous les filtres.
 
 ### A5 — Détail événement (bottom sheet)
 
@@ -202,7 +205,7 @@ Quand la **Protection avancée Android** est active, une bannière s'affiche en 
 
 ### R2 — Listes de blocage
 
-- Catégories avec interrupteur : Publicités et traqueurs (niveau « standard » / « renforcé ») · Hameçonnage · Sites malveillants. Par défaut, les trois sont activés : « Publicités et traqueurs » en niveau standard (HaGeZi LIGHT), « Hameçonnage » (Phishing Army) et « Sites malveillants » (URLhaus). Sources et licences : `docs/listes-de-blocage.md`.
+- Catégories avec interrupteur (**livré**, sans niveau « standard / renforcé » tant qu'une seule liste existe) : Publicités et traqueurs (niveau « standard » / « renforcé ») · Hameçonnage · Sites malveillants. Par défaut, les trois sont activés : « Publicités et traqueurs » en niveau standard (HaGeZi LIGHT), « Hameçonnage » (Phishing Army) et « Sites malveillants » (URLhaus). Sources et licences : `docs/listes-de-blocage.md`.
 - **Contournement DNS** : toujours actif, sans interrupteur, avec la mention « Empêche les apps d'échapper au filtrage ». Le désactiver viderait toutes les autres règles de leur sens.
 - **Exceptions personnelles** : domaines toujours autorisés, ajout manuel ou depuis A5.
 - **Domaines bloqués personnels** : ajout manuel ou depuis A5.
@@ -232,12 +235,12 @@ Pas de widget au MVP.
 | Écran | Données | Source |
 |---|---|---|
 | A1 | État | `LockdownStatus` (`isAlwaysOn`, `isLockdownEnabled`, révocation), état du service, événements moteur (DNS strict, redémarrage) |
-| A1, A2, A3, A4 | Compteurs, volumes, journal | Room (événements écrits par lots), requêtes paginées et indexées sur `ts` |
+| A1, A2, A3, A4 | Compteurs, volumes, journal | SQLCipher (événements écrits par lots), requêtes limitées et indexées sur `ts` |
 | A2, A3 | Liste des apps, UID partagés | `PackageManager` (`getInstalledApplications`, `getPackagesForUid`) |
 | A2 → moteur | Règle par app | Table UID → verdict, remplacée atomiquement dans le moteur (`preconisation-initialisation.md` §4) |
 | R1 | Protection avancée | `AdvancedProtectionPolicy` |
 | R1 | Version des règles | Version monotone persistée (`rules`) |
-| R2 | Exceptions et règles personnelles | Room, puis rechargement du moteur |
+| R2 | Exceptions et règles personnelles | Fichier de listes, puis rechargement du moteur |
 
 ## 8. Points à valider
 

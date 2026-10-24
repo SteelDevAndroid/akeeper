@@ -6,6 +6,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use akeeper_bundle::sources::{popular_domains, urlhaus_hosts};
 use akeeper_bundle::{
     SEED_LEN, Sources, build, build_unsigned, parse_hex_key, public_key_hex, signing_key, verify,
 };
@@ -18,7 +19,8 @@ usage :
         [--created <s unix>] [--ads <f>] [--malware <f>] [--phishing <f>]
         [--doh <f>] [--doh-ips <f>] [--notice <f>]
   akeeper-bundle build-unsigned --out <f> [--created <s unix>] [mêmes listes]   liste intégrée à l'APK (version 0)
-  akeeper-bundle verify <bundle> <clé 0 hex> [<clé 1 hex>]";
+  akeeper-bundle verify <bundle> <clé 0 hex> [<clé 1 hex>]
+  akeeper-bundle urlhaus --csv <f> --tranco <f> --top <n> --out <f>   hôtes d'URLhaus hors IP et domaines populaires";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -54,6 +56,7 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("{}", public_key_hex(&signing_key(&seed)));
             Ok(())
         }
+        "urlhaus" => urlhaus_command(rest),
         "build" => build_command(rest, true),
         "build-unsigned" => build_command(rest, false),
         "verify" => {
@@ -69,6 +72,32 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         _ => Err(USAGE.into()),
     }
+}
+
+fn urlhaus_command(args: &[String]) -> Result<(), String> {
+    let (pairs, rest) = args.as_chunks::<2>();
+    if !rest.is_empty() {
+        return Err(USAGE.into());
+    }
+    let (mut csv, mut tranco, mut top, mut out) = (None, None, None, None);
+    for [flag, value] in pairs {
+        match flag.as_str() {
+            "--csv" => csv = Some(value),
+            "--tranco" => tranco = Some(value),
+            "--top" => top = Some(value.parse::<usize>().map_err(|_| USAGE)?),
+            "--out" => out = Some(value),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let (Some(csv), Some(tranco), Some(top), Some(out)) = (csv, tranco, top, out) else {
+        return Err(USAGE.into());
+    };
+    let read = |path: &String| fs::read_to_string(path).map_err(|e| format!("{path} : {e}"));
+    let popular = popular_domains(&read(tranco)?, top);
+    let hosts = urlhaus_hosts(&read(csv)?, &popular);
+    fs::write(out, &hosts).map_err(|e| format!("{out} : {e}"))?;
+    println!("{out} : {} hôtes", hosts.lines().count());
+    Ok(())
 }
 
 fn build_command(args: &[String], signed: bool) -> Result<(), String> {

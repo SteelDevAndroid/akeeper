@@ -10,4 +10,6 @@ dependencies {
     api(project(":engine"))
     implementation(project(":rules"))
     implementation(libs.tink.android)
+    implementation(libs.sqlcipher.android)
+    implementation(libs.androidx.sqlite)
 }

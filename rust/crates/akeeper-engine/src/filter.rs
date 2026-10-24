@@ -6,30 +6,9 @@ use akeeper_proto::bundle::{self, BundleError, category, kind};
 
 use crate::Blocklist;
 
-/// Points d'accès DoH publics les plus répandus. Repli embarqué, utilisé seulement tant qu'aucun bundle signé
-/// ne fournit sa propre liste DoH.
-const DOH_HOSTS: &str = "
-cloudflare-dns.com
-one.one.one.one
-dns.google
-dns.quad9.net
-dns9.quad9.net
-dns10.quad9.net
-dns11.quad9.net
-doh.opendns.com
-doh.familyshield.opendns.com
-dns.adguard-dns.com
-dns.adguard.com
-dns.nextdns.io
-doh.cleanbrowsing.org
-doh.mullvad.net
-dns.mullvad.net
-freedns.controld.com
-dns.controld.com
-doh.dns.sb
-dns.alidns.com
-doh.pub
-";
+/// Points d'accès DoH publics, repli utilisé tant qu'aucun bundle ne fournit sa propre liste DoH. Même fichier que
+/// celui que publie le pipeline de règles (`rules/sources/doh-hosts.txt`).
+const DOH_HOSTS: &str = include_str!("../../../../rules/sources/doh-hosts.txt");
 
 #[derive(Debug)]
 pub enum RulesError {
@@ -49,16 +28,56 @@ impl From<fst::Error> for RulesError {
     }
 }
 
+/// Pourquoi un nom ou une adresse est refusé. Les codes sont exposés à Java (`NativeEngine.Reason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// Domaine bloqué par l'utilisateur.
+    Personal,
+    /// Contournement du filtrage par DNS chiffré (DoH) : jamais autorisable.
+    Evasion,
+    /// Catégorie du bundle, désignée par son identifiant (`akeeper_proto::bundle::category`).
+    Category(u8),
+}
+
+impl Reason {
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Personal => 1,
+            Self::Evasion => 2,
+            Self::Category(id) => 16u8.saturating_add(id),
+        }
+    }
+}
+
+/// Catégories de domaines du bundle que l'utilisateur laisse actives, un bit par identifiant. Les listes DoH ne
+/// dépendent pas de ce masque : le contournement DNS n'a pas d'interrupteur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CategoryMask(u32);
+
+impl CategoryMask {
+    pub const ALL: Self = Self(u32::MAX);
+
+    pub fn from_bits(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    fn allows(self, id: u8) -> bool {
+        1u32.checked_shl(u32::from(id))
+            .is_some_and(|bit| self.0 & bit != 0)
+    }
+}
+
 /// Contenu d'un bundle de règles. La signature a déjà été vérifiée côté Java (`BundleVerifier`) sur ce même fichier.
 pub struct BundleRules {
     version: u64,
-    domains: Vec<Blocklist>,
+    domains: Vec<(u8, Blocklist)>,
     doh_domains: Option<Blocklist>,
     doh_ips: Vec<Cidr>,
 }
 
 impl BundleRules {
-    pub fn parse(bytes: &[u8]) -> Result<Self, RulesError> {
+    /// Les catégories hors de `enabled` ne sont pas chargées ; les listes DoH le sont toujours.
+    pub fn parse(bytes: &[u8], enabled: CategoryMask) -> Result<Self, RulesError> {
         let envelope = bundle::parse(bytes)?;
         let mut rules = Self {
             version: envelope.version,
@@ -71,9 +90,9 @@ impl BundleRules {
                 (kind::DOMAINS, category::DOH) => {
                     rules.doh_domains = Some(Blocklist::from_fst(section.data.to_vec())?);
                 }
-                (kind::DOMAINS, _) => rules
+                (kind::DOMAINS, id) if enabled.allows(id) => rules
                     .domains
-                    .push(Blocklist::from_fst(section.data.to_vec())?),
+                    .push((id, Blocklist::from_fst(section.data.to_vec())?)),
                 (kind::CIDRS, category::DOH) => rules.doh_ips.extend(
                     bundle::cidrs(section.data)?
                         .into_iter()
@@ -117,7 +136,8 @@ impl Cidr {
 /// puis remplacé d'un bloc (`Engine::set_filter`).
 pub struct Filter {
     user: Blocklist,
-    domains: Vec<Blocklist>,
+    allowed: Blocklist,
+    domains: Vec<(u8, Blocklist)>,
     doh: Blocklist,
     doh_ips: Vec<Cidr>,
     /// Pause demandée par l'utilisateur : plus aucun nom ni adresse n'est bloqué. Partagé avec le moteur, qui le
@@ -130,6 +150,7 @@ impl Filter {
         match bundle {
             Some(b) => Self {
                 user,
+                allowed: Blocklist::empty(),
                 domains: b.domains,
                 doh: b
                     .doh_domains
@@ -139,12 +160,20 @@ impl Filter {
             },
             None => Self {
                 user,
+                allowed: Blocklist::empty(),
                 domains: Vec::new(),
                 doh: Blocklist::from_domains(DOH_HOSTS),
                 doh_ips: Vec::new(),
                 paused: Arc::default(),
             },
         }
+    }
+
+    /// Exceptions personnelles : elles l'emportent sur la liste personnelle et sur les catégories, mais jamais sur
+    /// le contournement DNS.
+    pub fn with_allowed(mut self, allowed: Blocklist) -> Self {
+        self.allowed = allowed;
+        self
     }
 
     pub(crate) fn share_pause(&mut self, paused: Arc<AtomicBool>) {
@@ -155,12 +184,30 @@ impl Filter {
         self.paused.load(Ordering::Relaxed)
     }
 
-    /// `name` est déjà en minuscules (normalisé par le parseur DNS ou TLS).
+    /// Raison du refus d'un nom, `None` s'il est autorisé. `name` est déjà en minuscules (normalisé par le parseur
+    /// DNS ou TLS). Ordre : contournement DNS, exceptions, liste personnelle, catégories actives.
+    pub(crate) fn verdict(&self, name: &str) -> Option<Reason> {
+        if self.is_paused() {
+            return None;
+        }
+        if self.doh.blocks(name) {
+            return Some(Reason::Evasion);
+        }
+        if self.allowed.blocks(name) {
+            return None;
+        }
+        if self.user.blocks(name) {
+            return Some(Reason::Personal);
+        }
+        self.domains
+            .iter()
+            .find(|(_, list)| list.blocks(name))
+            .map(|&(id, _)| Reason::Category(id))
+    }
+
+    #[cfg(test)]
     pub(crate) fn blocks(&self, name: &str) -> bool {
-        !self.is_paused()
-            && (self.user.blocks(name)
-                || self.doh.blocks(name)
-                || self.domains.iter().any(|list| list.blocks(name)))
+        self.verdict(name).is_some()
     }
 
     /// Adresse d'un résolveur DoH connu. Parcours linéaire : quelques centaines de plages, une fois par flux.
@@ -254,7 +301,7 @@ pub(crate) mod tests {
                 (128, "2606:4700:4700::1111".parse().unwrap()),
             ],
         );
-        let rules = BundleRules::parse(&bytes).unwrap();
+        let rules = BundleRules::parse(&bytes, CategoryMask::ALL).unwrap();
         assert_eq!(rules.version(), 7);
         let filter = Filter::new(Blocklist::from_domains("mine.example"), Some(rules));
         assert!(filter.blocks("mine.example"));
@@ -270,7 +317,11 @@ pub(crate) mod tests {
 
     #[test]
     fn bundle_without_doh_names_keeps_embedded_fallback() {
-        let rules = BundleRules::parse(&bundle_bytes("tracker.example", None, &[])).unwrap();
+        let rules = BundleRules::parse(
+            &bundle_bytes("tracker.example", None, &[]),
+            CategoryMask::ALL,
+        )
+        .unwrap();
         assert!(Filter::new(Blocklist::empty(), Some(rules)).blocks("dns.google"));
     }
 
@@ -280,7 +331,7 @@ pub(crate) mod tests {
         // Premier octet de données de la première section (FST) : la somme de contrôle ne correspond plus.
         let fst_start = bundle::HEADER_LEN + 8 + 10;
         bytes[fst_start] ^= 0xff;
-        assert!(BundleRules::parse(&bytes).is_err());
+        assert!(BundleRules::parse(&bytes, CategoryMask::ALL).is_err());
     }
 
     #[test]
@@ -288,7 +339,7 @@ pub(crate) mod tests {
         let bytes = bundle_bytes("tracker.example", None, &[(32, v4(192, 0, 2, 1))]);
         let mut filter = Filter::new(
             Blocklist::from_domains("mine.example"),
-            Some(BundleRules::parse(&bytes).unwrap()),
+            Some(BundleRules::parse(&bytes, CategoryMask::ALL).unwrap()),
         );
         let paused = Arc::new(AtomicBool::new(false));
         filter.share_pause(Arc::clone(&paused));
@@ -315,11 +366,14 @@ pub(crate) mod tests {
     #[test]
     fn the_shipped_default_list_blocks_ad_domains_and_spares_common_sites() {
         let bytes = include_bytes!("../../../../rules/src/main/assets/default-rules.akrb");
-        let rules = BundleRules::parse(bytes).unwrap();
+        let rules = BundleRules::parse(bytes, CategoryMask::ALL).unwrap();
         assert_eq!(rules.version(), 0);
         let filter = Filter::new(Blocklist::empty(), Some(rules));
         assert!(filter.blocks("googlesyndication.com"));
         assert!(filter.blocks("pagead2.googlesyndication.com"));
+        // La liste intégrée porte aussi les points d'accès et les adresses DoH du fichier partagé.
+        assert!(filter.blocks("dns.google") && filter.blocks_ip(v4(8, 8, 8, 8)));
+        assert!(!filter.blocks_ip(v4(93, 184, 216, 34)));
         for site in [
             "example.org",
             "wikipedia.org",
@@ -330,6 +384,111 @@ pub(crate) mod tests {
         ] {
             assert!(!filter.blocks(site), "{site} ne doit pas être bloqué");
         }
+    }
+
+    /// Bundle de test à trois catégories : publicité, malware et hameçonnage, plus la liste DoH.
+    fn three_categories() -> Vec<u8> {
+        use akeeper_proto::bundle::SIGNATURE_LEN;
+        let lists = [
+            (category::ADS, Blocklist::from_domains("ads.example")),
+            (
+                category::MALWARE,
+                Blocklist::from_domains("malware.example"),
+            ),
+            (category::PHISHING, Blocklist::from_domains("phish.example")),
+        ];
+        let sections: Vec<_> = lists
+            .iter()
+            .map(|(cat, list)| akeeper_proto::bundle::Section {
+                kind: kind::DOMAINS,
+                category: *cat,
+                data: list.as_bytes(),
+            })
+            .collect();
+        let mut bytes = bundle::signed_message(0, 1, 0, &sections).unwrap();
+        bytes.extend_from_slice(&[0; SIGNATURE_LEN]);
+        bytes
+    }
+
+    fn mask_without(id: u8) -> CategoryMask {
+        CategoryMask::from_bits(!(1u32 << id))
+    }
+
+    #[test]
+    fn only_the_enabled_categories_are_loaded_and_each_names_itself() {
+        let bytes = three_categories();
+        let all = Filter::new(
+            Blocklist::empty(),
+            Some(BundleRules::parse(&bytes, CategoryMask::ALL).unwrap()),
+        );
+        assert_eq!(
+            all.verdict("a.ads.example"),
+            Some(Reason::Category(category::ADS))
+        );
+        assert_eq!(
+            all.verdict("malware.example"),
+            Some(Reason::Category(category::MALWARE))
+        );
+        assert_eq!(
+            all.verdict("phish.example"),
+            Some(Reason::Category(category::PHISHING))
+        );
+
+        let no_ads = Filter::new(
+            Blocklist::empty(),
+            Some(BundleRules::parse(&bytes, mask_without(category::ADS)).unwrap()),
+        );
+        assert_eq!(no_ads.verdict("ads.example"), None);
+        assert!(no_ads.blocks("malware.example") && no_ads.blocks("phish.example"));
+
+        let none = Filter::new(
+            Blocklist::empty(),
+            Some(BundleRules::parse(&bytes, CategoryMask::from_bits(0)).unwrap()),
+        );
+        assert!(!none.blocks("malware.example"));
+        assert!(
+            none.blocks("dns.google"),
+            "le contournement DNS n'a pas d'interrupteur"
+        );
+    }
+
+    #[test]
+    fn exceptions_beat_personal_blocks_and_categories_but_never_the_dns_bypass() {
+        let bytes = three_categories();
+        let (blocked, allowed) = Blocklist::personal(
+            "mine.example\n@@ads.example\n@@dns.google\n@@mine.example\nother.example\n",
+        );
+        let filter = Filter::new(
+            blocked,
+            Some(BundleRules::parse(&bytes, CategoryMask::ALL).unwrap()),
+        )
+        .with_allowed(allowed);
+
+        assert_eq!(
+            filter.verdict("x.ads.example"),
+            None,
+            "exception contre catégorie"
+        );
+        assert_eq!(
+            filter.verdict("mine.example"),
+            None,
+            "exception contre liste personnelle"
+        );
+        assert_eq!(filter.verdict("other.example"), Some(Reason::Personal));
+        assert_eq!(filter.verdict("dns.google"), Some(Reason::Evasion));
+        assert_eq!(
+            filter.verdict("malware.example"),
+            Some(Reason::Category(category::MALWARE))
+        );
+    }
+
+    #[test]
+    fn reasons_have_stable_codes() {
+        assert_eq!(Reason::Personal.code(), 1);
+        assert_eq!(Reason::Evasion.code(), 2);
+        assert_eq!(Reason::Category(category::ADS).code(), 17);
+        assert_eq!(Reason::Category(category::PHISHING).code(), 19);
+        assert_eq!(Reason::Category(250).code(), 255);
     }
 
     #[test]

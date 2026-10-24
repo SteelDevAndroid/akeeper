@@ -9,16 +9,23 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.akeeper.R;
 import com.akeeper.rules.RuleBundle;
 import com.akeeper.rules.RuleStore;
 import com.akeeper.rules.RuleUpdates;
+import com.akeeper.security.AdvancedProtectionPolicy;
+import com.akeeper.vpn.ActivityLog;
+import com.akeeper.vpn.AppPrefs;
 import com.akeeper.vpn.ShieldStatus;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
 
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -27,6 +34,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.UnaryOperator;
 
 /**
  * Réglages (R1) avec les écrans R3 et « Licences » en boîtes de dialogue, et le guide batterie (O6) pour les
@@ -45,7 +53,7 @@ final class SettingsScreen implements AutoCloseable {
     private final TextView rulesSummary;
     private final TextView lockdownSummary;
 
-    SettingsScreen(AppCompatActivity activity, View root, Runnable onBack) {
+    SettingsScreen(AppCompatActivity activity, View root, Runnable onBack, Runnable onLists) {
         this.activity = activity;
         this.rules = RuleStore.get(activity);
         this.oem = OemGuide.of(Build.MANUFACTURER);
@@ -53,7 +61,9 @@ final class SettingsScreen implements AutoCloseable {
         root.findViewById(R.id.settings_back).setOnClickListener(v -> onBack.run());
 
         ViewGroup protection = root.findViewById(R.id.settings_protection);
-        var rulesRow = addRow(protection, 0, R.string.settings_rules_title, "");
+        addRow(protection, 0, R.string.settings_lists_title, activity.getString(R.string.settings_lists_subtitle))
+                .setOnClickListener(v -> onLists.run());
+        var rulesRow = addRow(protection, 1, R.string.settings_rules_title, "");
         rulesRow.setClickable(false);
         rulesRow.findViewById(R.id.row_chevron).setVisibility(View.GONE);
         rulesSummary = rulesRow.findViewById(R.id.row_subtitle);
@@ -74,6 +84,9 @@ final class SettingsScreen implements AutoCloseable {
             row.setOnClickListener(v -> showBatteryGuide(guide));
         });
 
+        bindNetwork(root.findViewById(R.id.settings_network), root);
+        bindPrivacy(root.findViewById(R.id.settings_privacy), root);
+
         ViewGroup about = root.findViewById(R.id.settings_about);
         addRow(about, -1, R.string.settings_limits_title, null).setOnClickListener(v -> showLimits());
         addRow(about, -1, R.string.settings_licenses_title, null).setOnClickListener(v -> showLicenses());
@@ -84,6 +97,174 @@ final class SettingsScreen implements AutoCloseable {
         // L'activation d'un bundle arrive sur le thread de WorkManager.
         ruleChanges = rules.observe(this::refreshRules);
         refresh();
+    }
+
+    /**
+     * Réseau local hors du tunnel. Désactivé par défaut, et verrouillé sous Protection avancée. Activer l'option demande
+     * une confirmation ; le service reconstruit alors le tunnel (les routes d'un VPN sont fixées à l'établissement).
+     */
+    private void bindNetwork(ViewGroup network, View root) {
+        var row = activity.getLayoutInflater().inflate(R.layout.item_switch_row, network, false);
+        ((TextView) row.findViewById(R.id.row_title)).setText(R.string.settings_lan_title);
+        var subtitle = (TextView) row.findViewById(R.id.row_subtitle);
+        subtitle.setText(R.string.settings_lan_subtitle);
+        MaterialSwitch toggle = row.findViewById(R.id.row_switch);
+        toggle.setEnabled(false);
+        network.addView(row);
+        try {
+            worker.execute(() -> {
+                AppPrefs loaded;
+                try {
+                    loaded = AppPrefs.get(activity);
+                } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+                    loaded = null;
+                }
+                var prefs = loaded;
+                boolean locked = new AdvancedProtectionPolicy(activity).active();
+                activity.runOnUiThread(() -> showNetwork(prefs, locked, toggle, subtitle, root));
+            });
+        } catch (RejectedExecutionException closed) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void showNetwork(AppPrefs prefs, boolean locked, MaterialSwitch toggle, TextView subtitle, View root) {
+        if (prefs == null) {
+            subtitle.setText(R.string.settings_log_unavailable);
+            return;
+        }
+        if (locked) {
+            subtitle.setText(R.string.settings_lan_locked);
+            toggle.setChecked(false);
+            return;
+        }
+        toggle.setChecked(prefs.settings().lanBypass());
+        toggle.setEnabled(true);
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            if (!checked) {
+                save(prefs, root, settings -> settings.withLanBypass(false));
+                return;
+            }
+            // La confirmation précède l'écriture : un refus remet l'interrupteur sans toucher aux préférences.
+            toggle.setOnCheckedChangeListener(null);
+            toggle.setChecked(false);
+            new MaterialAlertDialogBuilder(activity)
+                    .setTitle(R.string.settings_lan_warning_title)
+                    .setMessage(R.string.settings_lan_warning_body)
+                    .setNegativeButton(R.string.action_cancel, null)
+                    .setPositiveButton(R.string.settings_lan_confirm, (d, w) -> {
+                        save(prefs, root, settings -> settings.withLanBypass(true));
+                        showNetwork(prefs, false, toggle, subtitle, root);
+                        toggle.setChecked(true);
+                    })
+                    .setOnDismissListener(d -> showNetwork(prefs, false, toggle, subtitle, root))
+                    .show();
+        });
+    }
+
+    /** Journal d'activité : interrupteur, durée de conservation et effacement. Le Keystore n'est ouvert que hors UI. */
+    private void bindPrivacy(ViewGroup privacy, View root) {
+        var logRow = activity.getLayoutInflater().inflate(R.layout.item_switch_row, privacy, false);
+        ((TextView) logRow.findViewById(R.id.row_title)).setText(R.string.settings_log_title);
+        ((TextView) logRow.findViewById(R.id.row_subtitle)).setText(R.string.settings_log_subtitle);
+        MaterialSwitch logSwitch = logRow.findViewById(R.id.row_switch);
+        // Inactif tant que les préférences ne sont pas lues (et si le Keystore est indisponible).
+        logSwitch.setEnabled(false);
+        privacy.addView(logRow);
+        var retentionRow = addRow(privacy, -1, R.string.settings_retention_title, "");
+        retentionRow.findViewById(R.id.row_chevron).setVisibility(View.GONE);
+        retentionRow.setEnabled(false);
+        var retentionValue = (TextView) retentionRow.findViewById(R.id.row_subtitle);
+        addRow(privacy, -1, R.string.settings_clear_title, null).setOnClickListener(v -> confirmClear(root));
+
+        try {
+            worker.execute(() -> {
+                AppPrefs loaded;
+                try {
+                    loaded = AppPrefs.get(activity);
+                } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+                    loaded = null;
+                }
+                var prefs = loaded;
+                activity.runOnUiThread(() -> showPrivacy(prefs, logSwitch, retentionRow, retentionValue, root));
+            });
+        } catch (RejectedExecutionException closed) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void showPrivacy(AppPrefs prefs, MaterialSwitch logSwitch, View retentionRow, TextView retentionValue,
+                             View root) {
+        if (prefs == null) {
+            retentionValue.setText(R.string.settings_log_unavailable);
+            return;
+        }
+        logSwitch.setChecked(prefs.settings().logEnabled());
+        logSwitch.setEnabled(true);
+        logSwitch.setOnCheckedChangeListener((button, checked) -> save(prefs, root,
+                settings -> settings.withLogEnabled(checked)));
+        retentionValue.setText(activity.getString(R.string.settings_retention_value, prefs.settings().retentionDays()));
+        retentionRow.setEnabled(true);
+        retentionRow.setOnClickListener(v -> {
+            var choices = AppPrefs.RETENTION_CHOICES;
+            var labels = new String[choices.length];
+            int checked = 0;
+            for (int i = 0; i < choices.length; i++) {
+                labels[i] = activity.getString(R.string.settings_retention_value, choices[i]);
+                if (choices[i] == prefs.settings().retentionDays()) {
+                    checked = i;
+                }
+            }
+            new MaterialAlertDialogBuilder(activity)
+                    .setTitle(R.string.settings_retention_title)
+                    .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                        dialog.dismiss();
+                        retentionValue.setText(labels[which]);
+                        save(prefs, root, settings -> settings.withRetentionDays(choices[which]));
+                    })
+                    .setNegativeButton(R.string.action_cancel, null)
+                    .show();
+        });
+    }
+
+    private void save(AppPrefs prefs, View root, UnaryOperator<AppPrefs.Settings> change) {
+        try {
+            worker.execute(() -> {
+                try {
+                    prefs.update(change);
+                } catch (IOException e) {
+                    activity.runOnUiThread(() ->
+                            Snackbar.make(root, R.string.event_save_failed, Snackbar.LENGTH_SHORT).show());
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void confirmClear(View root) {
+        new MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.settings_clear_confirm_title)
+                .setMessage(R.string.settings_clear_confirm_body)
+                .setNegativeButton(R.string.action_cancel, null)
+                .setPositiveButton(R.string.settings_clear_action, (d, w) -> {
+                    try {
+                        worker.execute(() -> {
+                            int message;
+                            try {
+                                ActivityLog.get(activity).clear();
+                                message = R.string.settings_clear_done;
+                            } catch (GeneralSecurityException | IOException | RuntimeException unavailable) {
+                                message = R.string.event_save_failed;
+                            }
+                            int shown = message;
+                            activity.runOnUiThread(() -> Snackbar.make(root, shown, Snackbar.LENGTH_SHORT).show());
+                        });
+                    } catch (RejectedExecutionException closed) {
+                        // Écran fermé entre-temps.
+                    }
+                })
+                .show();
     }
 
     /** Met à jour les valeurs qui changent hors de l'écran : verrouillage et règles. */

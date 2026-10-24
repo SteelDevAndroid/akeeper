@@ -17,6 +17,8 @@ import com.akeeper.rules.RuleUpdates;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import com.akeeper.security.AdvancedProtectionPolicy;
+
 import java.security.GeneralSecurityException;
 
 /**
@@ -41,6 +43,13 @@ public final class ShieldVpnService extends VpnService {
     private UpstreamDns upstream;
     private ShieldStatus.Subscription appRules;
     private RuleStore.Subscription ruleUpdates;
+    private ShieldStatus.Subscription prefsChanges;
+    private ShieldStatus.Subscription listsChanges;
+    private AppPrefs prefs;
+    private ActivityRecorder recorder;
+    private boolean lanApplied;
+    // Une lecture suivie de l'envoi au moteur ne doit pas s'entrecroiser avec une autre : la dernière gagne.
+    private final Object reloadLock = new Object();
     private boolean privateDnsStrict;
     // Fin de la pause en horloge murale, pour l'affichage ; le moteur mesure la durée avec son horloge monotone.
     private long pausedUntil;
@@ -108,6 +117,11 @@ public final class ShieldVpnService extends VpnService {
 
     private boolean establish() {
         // allowBypass() et allowFamily() sont proscrits : ils ouvrent un canal de fuite hors tunnel.
+        loadPrefs();
+        // Protection avancée : l'option réseau local est ignorée, quoi que dise la préférence.
+        var policy = new AdvancedProtectionPolicy(this).effective(new ShieldPolicy(
+                prefs != null && prefs.settings().lanBypass(), LanRanges.prefixes(), false));
+        lanApplied = policy.allowLanBypass();
         var builder = new Builder()
                 .setSession(getString(R.string.vpn_session))
                 .setMtu(1500)
@@ -120,7 +134,8 @@ public final class ShieldVpnService extends VpnService {
                 .addDnsServer(DNS_V6)
                 .setBlocking(false)
                 .setMetered(false);
-        // Aucune exclusion LAN : l'option opt-in (R1) n'existe pas encore, le LAN passe donc par le filtre.
+        // Les plages exclues ne contiennent jamais les adresses virtuelles du tunnel (voir LanRanges).
+        policy.lanRoutes().forEach(builder::excludeRoute);
 
         var tun = builder.establish();
         if (tun == null) {
@@ -128,7 +143,7 @@ public final class ShieldVpnService extends VpnService {
         }
         var rules = RuleStore.get(this);
         try {
-            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), openBundle(rules),
+            engine = NativeEngine.start(tun.detachFd(), openBlocklist(), openBundle(rules), categoryMask(prefs),
                     new EngineHost(new FlowOwnerResolver(getSystemService(ConnectivityManager.class))));
         } catch (IllegalStateException e) {
             return false;
@@ -136,14 +151,48 @@ public final class ShieldVpnService extends VpnService {
         ShieldStatus.attach(engine);
         applyAppRules();
         // Moteur capturé, comme pour les règles par app : l'activation arrive sur le thread de WorkManager.
-        var current = engine;
-        ruleUpdates = rules.observe(() -> current.setRules(openBlocklist(), openBundle(rules)));
+        // Valeurs capturées : ces observateurs tournent hors du thread principal, qui peut arrêter le service.
+        var running = engine;
+        var preferences = prefs;
+        ruleUpdates = rules.observe(() -> reloadRules(running, rules, preferences));
+        listsChanges = UserLists.get(this).observe(lists -> reloadRules(running, rules, preferences));
+        if (preferences != null) {
+            prefsChanges = preferences.observe(settings -> {
+                reloadRules(running, rules, preferences);
+                main.post(() -> onLanOption(settings));
+            });
+        }
+        recorder = new ActivityRecorder(this, engine, preferences);
         // Planifiée ici et non dans l'UI : Always-on VPN démarre le service sans jamais ouvrir l'app.
         RuleUpdates.schedule(this);
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
                 this::followUnderlying, strict -> main.post(() -> onPrivateDnsStrict(strict)));
         upstream.start();
         return true;
+    }
+
+    private void loadPrefs() {
+        try {
+            prefs = AppPrefs.get(this);
+        } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+            // Keystore indisponible : préférences par défaut, donc toutes les catégories actives.
+            prefs = null;
+        }
+    }
+
+    /** Les routes d'un VPN sont fixées à l'établissement : changer l'option réseau local le reconstruit. */
+    private void onLanOption(AppPrefs.Settings settings) {
+        boolean wanted = settings.lanBypass() && !new AdvancedProtectionPolicy(this).active();
+        if (wanted != lanApplied && engine != null) {
+            shutdown();
+            if (!establish()) {
+                ShieldStatus.publish(ShieldStatus.Snapshot.STOPPED);
+                stopSelf();
+                return;
+            }
+            ShieldStatus.publish(new ShieldStatus.Snapshot(true,
+                    new LockdownStatus(isAlwaysOn(), isLockdownEnabled()), privateDnsStrict, pausedUntil));
+        }
     }
 
     private void applyAppRules() {
@@ -204,6 +253,20 @@ public final class ShieldVpnService extends VpnService {
         }
     }
 
+    private static int categoryMask(AppPrefs prefs) {
+        return RuleCategory.mask((prefs == null ? AppPrefs.Settings.DEFAULT : prefs.settings()).disabledCategories());
+    }
+
+    /**
+     * Relit la liste personnelle, le bundle et les catégories actives, et remplace les règles du moteur. Après
+     * {@code close()}, {@code setRules} est simplement sans effet.
+     */
+    private void reloadRules(NativeEngine target, RuleStore rules, AppPrefs preferences) {
+        synchronized (reloadLock) {
+            target.setRules(openBlocklist(), openBundle(rules), categoryMask(preferences));
+        }
+    }
+
     /** Règles cédées au moteur : bundle signé, sinon liste intégrée à l'APK ; -1 si aucune n'est lisible. */
     private static int openBundle(RuleStore rules) {
         return rules.openRules().map(active -> {
@@ -238,6 +301,17 @@ public final class ShieldVpnService extends VpnService {
     private void shutdown() {
         main.removeCallbacks(endPause);
         pausedUntil = 0;
+        for (var subscription : new ShieldStatus.Subscription[]{prefsChanges, listsChanges}) {
+            if (subscription != null) {
+                subscription.close();
+            }
+        }
+        prefsChanges = null;
+        listsChanges = null;
+        if (recorder != null) {
+            recorder.close();
+            recorder = null;
+        }
         if (ruleUpdates != null) {
             ruleUpdates.close();
             ruleUpdates = null;

@@ -22,4 +22,5 @@ out="$root/rules/src/main/assets/default-rules.akrb"
 mkdir -p "$(dirname "$out")"
 cd "$root/rust"
 cargo run -q --locked -p akeeper-bundle -- build-unsigned \
-    --ads "$list" --notice "$tmp/notice.txt" --created "$(date -u +%s)" --out "$out"
+    --ads "$list" --doh "$root/rules/sources/doh-hosts.txt" --doh-ips "$root/rules/sources/doh-ips.txt" \
+    --notice "$tmp/notice.txt" --created "$(date -u +%s)" --out "$out"

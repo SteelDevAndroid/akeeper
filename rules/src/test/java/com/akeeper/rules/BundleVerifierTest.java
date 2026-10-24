@@ -49,6 +49,15 @@ class BundleVerifierTest {
     }
 
     @Test
+    void listsTheDomainCategoriesOfTheSharedFixtureWithoutTheDohOne() throws IOException {
+        try (var in = getClass().getResourceAsStream("fixture-v5.akrb")) {
+            // Le fixture porte publicité (1), hameçonnage (3) et DoH (4) ; R2 ne propose pas le DoH.
+            assertThat(BundleVerifier.categories(in.readAllBytes())).containsExactlyInAnyOrder(1, 3);
+        }
+        assertThat(BundleVerifier.categories(new byte[10])).isEmpty();
+    }
+
+    @Test
     void readsTheNoticeOfAJavaBuiltBundleAndToleratesGarbage() throws GeneralSecurityException {
         assertThat(BundleVerifier.notice(TestBundles.signed(first, 0, 1, 0))).contains("test");
         assertThat(BundleVerifier.notice(new byte[10])).isEmpty();

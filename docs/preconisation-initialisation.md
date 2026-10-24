@@ -31,7 +31,7 @@ Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. 
 - **`protect()`** : il passe par un rappel JNI vers `NativeEngine.Host`. Un socket que le système refuse de protéger n'émet jamais.
 
 Écarts et limites :
-- **Réseau local** : pas d'exclusion LAN, l'option opt-in (R1) n'existe pas encore, et `AdvancedProtectionPolicy` n'est donc pas encore branchée. Tout le LAN passe par le filtre, ce qui reste le comportement par défaut voulu.
+- **Réseau local** : exclu du tunnel seulement si l'utilisateur l'active dans R1 (voir « Réseau local (R1) » plus bas) ; par défaut, tout le LAN passe par le filtre.
 - **Fragments IPv4** : abandonnés, au risque de casser de rares protocoles UDP qui envoient des datagrammes de plus de 1 472 octets.
 - **DNS/TCP vers le résolveur** : réinitialisé. Une réponse DNS tronquée en UDP échoue donc au lieu de se replier sur TCP.
 - **ICMP** : ni relayé ni répondu, donc `ping` ne fonctionne pas.
@@ -85,7 +85,7 @@ Pas encore livrés :
   - la ligne Verrouillage ouvre directement les réglages VPN au lieu de revenir à O4 ;
   - O6 n'a pas d'intent propre à chaque OEM, faute de pouvoir les vérifier sur appareil ;
   - R3, Licences et O6 sont des boîtes de dialogue, pas des écrans, pour rester sans Fragments.
-- **Absents, car sans fonction derrière** : réseau local (R1 : l'option n'existe pas dans le service), journal et durée de conservation (pas de Room), statistiques anonymes, bannière Protection avancée (liée à l'option réseau local), listes par catégorie (R2).
+- **Absents, car sans fonction derrière** : statistiques anonymes, bannière Protection avancée (l'option réseau local est seulement verrouillée, sans bannière).
 
 **Pause 15 minutes livrée (A1)** :
 - **Accueil** : l'état vert propose **Pause 15 min**. L'état ambre « En pause — reprise à HH:mm » propose **Reprendre maintenant**. La pause passe après les états dégradés (verrouillage manquant, DNS privé strict) dans l'ordre de priorité, comme dans la table de `docs/ui-ecrans.md`.
@@ -98,12 +98,32 @@ Pas encore livrés :
 - **Écart n°7** : cette liste n'est pas signée Ed25519, son authenticité est celle de l'APK. Elle ne peut pas servir de mise à jour, et les bundles téléchargés restent tous vérifiés.
 - Phishing Army et URLhaus restent à intégrer avec les bundles signés (licence et accord à régler).
 
+**Pipeline de règles livré** (`scripts/build-rules.sh`, `.github/workflows/rules.yml`, `akeeper-bundle urlhaus`) :
+- Il construit un bundle signé avec les catégories publicité (HaGeZi LIGHT), hameçonnage (Phishing Army), malware (URLhaus, s'il a sa clé) et DoH (fichiers `rules/sources/`), le revérifie avec les clés publiques de l'app, puis le publie sur GitHub Pages toutes les 6 h.
+- L'extraction URLhaus écarte les adresses IP et les hôtes sous un domaine du top 100 000 Tranco.
+- **Non essayé** : le téléchargement réel d'URLhaus, faute de clé, et la publication sur Pages. Le script a été exécuté ici sur de vraies listes HaGeZi et Phishing Army, avec une clé de test.
+- **À faire par le porteur** : clés, secrets, variables, Pages (voir `docs/bundle-regles.md`).
+
+**R2, listes de blocage livré** :
+- **Catégories** : Publicités et traqueurs, Hameçonnage, Sites malveillants, avec un interrupteur chacune. Une catégorie absente des règles en vigueur est grisée avec « Pas encore disponible » : aujourd'hui la liste intégrée ne porte que la publicité. Les préférences sont chiffrées (`AppPrefs`).
+- **Contournement DNS** : ligne sans interrupteur, toujours active.
+- **Listes personnelles** : exceptions et domaines bloqués, validés en direct (`DomainRules`), avec « Annuler » après un retrait. Un domaine ajouté d'un côté est retiré de l'autre.
+- **Moteur** : ordre d'évaluation = contournement DNS, exceptions, domaines personnels, catégories actives. Une exception gagne sur tout sauf sur le contournement DNS, comme le demande A5. `nativeStart` et `nativeSetRules` reçoivent un masque de catégories.
+- **Écarts** : pas de niveau « standard / renforcé » pour la publicité (une seule liste existe) .
+
+**Journal d'activité livré (A3, A4, A5, R1 Vie privée)** :
+- **Moteur** : `events.rs` garde un tampon borné (4096 événements), regroupe les répétitions identiques à moins de 10 s et ne stocke rien tant que le journal est coupé. Il consigne chaque requête DNS (autorisée ou refusée, avec la raison), les SNI refusés, les adresses DoH refusées et les refus du pare-feu par app. L'UID d'une requête DNS n'est cherché (appel Binder) que si le journal est actif. JNI : `nativeSetLogging`, `nativeDrainEvents` (format binaire décrit dans `events.rs`).
+- **Stockage** : base SQLCipher (`ActivityLog`) dans `noBackupFilesDir`, clé de 32 octets chiffrée par Tink/Keystore (`DatabaseKey`). `ActivityRecorder` vide le moteur chaque seconde dans une transaction et purge selon la durée de conservation (1, 3 ou 7 jours). Une base illisible (clé perdue) est recréée.
+- **Écrans** : onglet Activité (A4 : Bloqués par défaut, Autorisés, Tous ; recherche ; pied de liste), fiche événement (A5 : raison, autoriser ou bloquer le domaine, copier), fiche app (A3, en touchant une ligne de l'écran Apps), et dans les Réglages : interrupteur du journal, durée de conservation, effacement avec confirmation.
+- **Écarts** : pas de Room, mais l'API SQLCipher directe (`SQLiteOpenHelper`, une table, pas de DAO : pas de processeur d'annotations pour une seule table) ; pas de module `:storage`, le journal vit dans `:vpn` à côté de `AppPrefs`. Le journal est actif par défaut, avec 7 jours de conservation.
+- **Volumes (A3)** : le moteur additionne les octets relayés par UID (TCP et UDP, hors DNS), vidés chaque seconde dans des seaux horaires de la base ; la fiche affiche 24 h et 7 jours. A4 regroupe par heure et filtre par app.
+- **Réseau local (R1)** : interrupteur désactivé par défaut avec avertissement, verrouillé sous Protection avancée. Les plages privées sont exclues du tunnel **sauf** `10.111.0.0/16` et `fd00:6d73::/32` (DNS virtuel), calculé par `LanRanges`. Les routes étant fixées à l'établissement, le service reconstruit le tunnel au changement : coupure brève. Non essayé sur appareil.
+- **Non essayé sur appareil** : l'ouverture de la base SQLCipher et son chiffrement (les tests JVM n'ont pas la bibliothèque native). Les `.so` de SQLCipher sont alignés 16 KB (`scripts/check-16kb.sh`).
+
 Restent pour J5 :
 - **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
 - **Pinning TLS** du serveur de règles.
 - **Bundle initial** dans l'APK.
-- **Choix des catégories** (R2).
-- **Stockage SQLCipher et journaux de flux** (purge à 7 jours).
 
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 

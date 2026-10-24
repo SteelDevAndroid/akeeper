@@ -57,7 +57,7 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 
 ### URLhaus (P0, retenue après accord)
 
-- **Accès** : le fichier hosts public (`/downloads/hostfile/`) répond **HTTP 410**. Tout export demande désormais une Auth-Key nominative.
+- **Accès** : le fichier hosts public (`/downloads/hostfile/`) répond **HTTP 410**. Tout export demande désormais une Auth-Key nominative, placée dans l'URL : `https://urlhaus-api.abuse.ch/v2/files/exports/<clé>/recent.csv` (URL des 30 derniers jours, d'après la page `urlhaus.abuse.ch/api/`).
 - **Conditions d'abuse.ch** (version du 21 octobre 2026) :
   - usage gratuit réservé aux fins non lucratives, dans les limites de volume ;
   - usage commercial ou à but lucratif soumis à un abonnement géré par Spamhaus ;
@@ -96,7 +96,7 @@ Phishing Army apporte presque uniquement des domaines nouveaux. StevenBlack couv
 | 1 | Autorisation URLhaus — **obtenue selon le porteur** ; archiver l'écrit et son périmètre | Porteur du projet |
 | 2 | Revue des conditions des 9 sources de Phishing Army (redistribution, attribution) — **acceptée**, à mener avant la première diffusion | Porteur du projet |
 | 3 | Profil par défaut — **décidé : LIGHT + Phishing Army** | Porteur du projet |
-| 4 | Pipeline serveur : téléchargement, normalisation, FST par catégorie, signature Ed25519 (J5) | Développement |
+| 4 | Pipeline serveur : téléchargement, normalisation, FST par catégorie, signature Ed25519 (J5) — **fait** : `scripts/build-rules.sh` et `.github/workflows/rules.yml`, à activer (voir `docs/bundle-regles.md`) | Développement |
 | 5 | Mettre à jour R2 et R1 selon §4 | Développement |
 
 ## Sources consultées

@@ -4,16 +4,9 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 
 import com.google.crypto.tink.Aead;
-import com.google.crypto.tink.KeyTemplates;
-import com.google.crypto.tink.RegistryConfiguration;
-import com.google.crypto.tink.aead.AeadConfig;
-import com.google.crypto.tink.integration.android.AndroidKeysetManager;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
@@ -38,15 +31,13 @@ public final class AppRules {
 
     private static volatile AppRules instance;
 
-    private final File file;
-    private final Aead aead;
+    private final SecureFile file;
     private final Set<Consumer<Set<String>>> listeners = new CopyOnWriteArraySet<>();
     // Instantané immuable : lu sans verrou, remplacé sous le moniteur de setBlocked().
     private volatile Set<String> blocked;
 
     AppRules(File file, Aead aead) {
-        this.file = file;
-        this.aead = aead;
+        this.file = new SecureFile(file, aead, ASSOCIATED_DATA);
         this.blocked = load();
     }
 
@@ -58,23 +49,12 @@ public final class AppRules {
                 current = instance;
                 if (current == null) {
                     var app = context.getApplicationContext();
-                    current = new AppRules(new File(app.getNoBackupFilesDir(), FILE_NAME), keystoreAead(app));
+                    current = new AppRules(new File(app.getNoBackupFilesDir(), FILE_NAME), SecureStorage.aead(app));
                     instance = current;
                 }
             }
         }
         return current;
-    }
-
-    private static Aead keystoreAead(Context context) throws GeneralSecurityException, IOException {
-        AeadConfig.register();
-        var handle = new AndroidKeysetManager.Builder()
-                .withSharedPref(context, "app_rules_keyset", "akeeper_tink")
-                .withKeyTemplate(KeyTemplates.get("AES256_GCM"))
-                .withMasterKeyUri("android-keystore://akeeper_app_rules")
-                .build()
-                .getKeysetHandle();
-        return handle.getPrimitive(RegistryConfiguration.get(), Aead.class);
     }
 
     public Set<String> blocked() {
@@ -118,32 +98,12 @@ public final class AppRules {
     }
 
     private Set<String> load() {
-        if (!file.exists()) {
-            return Set.of();
-        }
-        try {
-            var clear = aead.decrypt(Files.readAllBytes(file.toPath()), ASSOCIATED_DATA);
-            return decode(clear);
-        } catch (IOException | GeneralSecurityException unreadable) {
-            // Fichier illisible ou falsifié : aucune règle plutôt que des règles douteuses ; l'app reste utilisable.
-            return Set.of();
-        }
+        // Fichier absent, illisible ou falsifié : aucune règle plutôt que des règles douteuses ; l'app reste utilisable.
+        return file.read().map(AppRules::decode).orElse(Set.of());
     }
 
     private void write(Set<String> packages) throws IOException {
-        byte[] cipher;
-        try {
-            cipher = aead.encrypt(encode(packages), ASSOCIATED_DATA);
-        } catch (GeneralSecurityException e) {
-            throw new IOException("chiffrement des règles impossible", e);
-        }
-        var temp = new File(file.getPath() + ".tmp");
-        try (var out = new FileOutputStream(temp)) {
-            out.write(cipher);
-            // fsync avant rename : une coupure ne laisse jamais un fichier de règles tronqué.
-            out.getFD().sync();
-        }
-        Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        file.write(encode(packages));
     }
 
     static byte[] encode(Set<String> packages) {

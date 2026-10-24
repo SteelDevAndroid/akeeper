@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use akeeper_proto::udp::Datagram;
@@ -11,6 +12,7 @@ use mio::{Interest, Registry, Token};
 use akeeper_proto::ip::PROTO_UDP;
 
 use crate::SharedHost;
+use crate::events::{EventKind, EventLog, REASON_APP};
 use crate::stats::{Counter, Stats};
 
 /// Premier jeton mio réservé aux flux UDP ; ceux d'en dessous appartiennent au TUN, au réveil et aux DNS amont.
@@ -37,15 +39,17 @@ struct Flow {
 /// NAT UDP : un socket protégé et connecté par couple (client, destination).
 pub(crate) struct UdpNat {
     host: SharedHost,
+    events: Arc<EventLog>,
     by_endpoints: HashMap<(SocketAddr, SocketAddr), usize>,
     flows: HashMap<usize, Flow>,
     next_token: usize,
 }
 
 impl UdpNat {
-    pub(crate) fn new(host: SharedHost) -> Self {
+    pub(crate) fn new(host: SharedHost, events: Arc<EventLog>) -> Self {
         Self {
             host,
+            events,
             by_endpoints: HashMap::new(),
             flows: HashMap::new(),
             next_token: TOKEN_BASE,
@@ -72,6 +76,13 @@ impl UdpNat {
                 let uid = self.host.owner_uid(PROTO_UDP, datagram.src, datagram.dst);
                 if uid.is_some_and(|u| blocked.contains(&u)) {
                     stats.add(Counter::AppBlocked, 1);
+                    self.events.record(
+                        EventKind::App,
+                        true,
+                        REASON_APP,
+                        uid,
+                        &datagram.dst.ip().to_string(),
+                    );
                     return Sent::Blocked;
                 }
                 match self.open(registry, datagram, uid, now) {
@@ -86,7 +97,9 @@ impl UdpNat {
         if let Some(flow) = self.flows.get_mut(&token) {
             flow.last_active = now;
             // Tampon d'émission plein : perte assumée, comme sur un vrai lien UDP.
-            let _ = flow.socket.send(datagram.payload);
+            if flow.socket.send(datagram.payload).is_ok() {
+                self.events.traffic(flow.uid, datagram.payload.len(), 0);
+            }
         }
         Sent::Relayed
     }
@@ -157,6 +170,7 @@ impl UdpNat {
                 Ok(n) => {
                     flow.last_active = now;
                     if let Some(payload) = buf.get(..n) {
+                        self.events.traffic(flow.uid, 0, n);
                         deliver(flow.remote, flow.client, payload);
                     }
                 }

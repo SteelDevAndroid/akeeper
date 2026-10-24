@@ -3,6 +3,7 @@ package com.akeeper.engine;
 import android.os.ParcelFileDescriptor;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Moteur natif propriétaire du fd TUN : résolveur DNS local filtrant, NAT UDP protégé, neutralisation
@@ -48,12 +49,13 @@ public final class NativeEngine implements AutoCloseable {
      * Le moteur prend possession des fd détachés et les ferme, y compris en cas d'échec. Une liste personnelle
      * illisible fait échouer le démarrage ; un bundle illisible est ignoré (liste personnelle et repli DoH seuls).
      *
-     * @param blocklistFd liste personnelle de domaines, un par ligne ; -1 pour une liste vide
-     * @param bundleFd    bundle de règles <b>déjà vérifié</b> ({@code RuleStore.openActive}) ; -1 si absent
+     * @param blocklistFd liste personnelle de domaines, un par ligne, {@code @@} devant une exception ; -1 si vide
+     * @param bundleFd    bundle de règles <b>déjà vérifié</b> ({@code RuleStore.openRules}) ; -1 si absent
+     * @param categories  un bit par catégorie du bundle laissée active (-1 : toutes)
      * @param host        référencé par le moteur jusqu'à {@link #close()}
      */
-    public static NativeEngine start(int detachedTunFd, int blocklistFd, int bundleFd, Host host) {
-        long h = nativeStart(detachedTunFd, blocklistFd, bundleFd, host);
+    public static NativeEngine start(int detachedTunFd, int blocklistFd, int bundleFd, int categories, Host host) {
+        long h = nativeStart(detachedTunFd, blocklistFd, bundleFd, categories, host);
         if (h == 0) {
             throw new IllegalStateException("Démarrage du moteur natif impossible");
         }
@@ -85,13 +87,13 @@ public final class NativeEngine implements AutoCloseable {
      *
      * @return {@code false} si le moteur est arrêté ou les règles illisibles : les règles en place restent actives
      */
-    public synchronized boolean setRules(int blocklistFd, int bundleFd) {
+    public synchronized boolean setRules(int blocklistFd, int bundleFd, int categories) {
         if (handle == 0) {
             closeQuietly(blocklistFd);
             closeQuietly(bundleFd);
             return false;
         }
-        return nativeSetRules(handle, blocklistFd, bundleFd) == 0;
+        return nativeSetRules(handle, blocklistFd, bundleFd, categories) == 0;
     }
 
     /**
@@ -105,6 +107,24 @@ public final class NativeEngine implements AutoCloseable {
     /** Rétablit les blocages sans attendre la fin de la pause. */
     public synchronized boolean resume() {
         return handle != 0 && nativePause(handle, 0) == 0;
+    }
+
+    /**
+     * Active ou coupe le journal d'activité. Coupé, le moteur ne garde rien et n'interroge plus le propriétaire des
+     * requêtes DNS.
+     */
+    public synchronized boolean setLogging(boolean enabled) {
+        return handle != 0 && nativeSetLogging(handle, enabled ? 1 : 0) == 0;
+    }
+
+    /** Événements accumulés depuis le dernier appel ; vide une fois le moteur arrêté. */
+    public synchronized List<FlowEvent> drainEvents() {
+        return handle == 0 ? List.of() : FlowEvent.parse(nativeDrainEvents(handle));
+    }
+
+    /** Volumes par app depuis le dernier appel ; comptés seulement journal actif. */
+    public synchronized List<TrafficSample> drainTraffic() {
+        return handle == 0 ? List.of() : TrafficSample.parse(nativeDrainTraffic(handle));
     }
 
     /** Renvoie -1 une fois le moteur arrêté. */
@@ -130,15 +150,21 @@ public final class NativeEngine implements AutoCloseable {
         }
     }
 
-    private static native long nativeStart(int tunFd, int blocklistFd, int bundleFd, Host host);
+    private static native long nativeStart(int tunFd, int blocklistFd, int bundleFd, int categories, Host host);
 
-    private static native int nativeSetRules(long handle, int blocklistFd, int bundleFd);
+    private static native int nativeSetRules(long handle, int blocklistFd, int bundleFd, int categories);
 
     private static native int nativePause(long handle, long millis);
 
     private static native int nativeSetUpstream(long handle, int slot, int fd);
 
     private static native int nativeSetBlockedUids(long handle, int[] uids);
+
+    private static native int nativeSetLogging(long handle, int enabled);
+
+    private static native byte[] nativeDrainEvents(long handle);
+
+    private static native byte[] nativeDrainTraffic(long handle);
 
     private static native long nativeCounter(long handle, int counter);
 

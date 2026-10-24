@@ -13,9 +13,14 @@ public final class AdvancedProtectionPolicy {
         this.manager = context.getSystemService(AdvancedProtectionManager.class);
     }
 
+    /** Protection avancée active : l'option réseau local est alors indisponible. */
+    public boolean active() {
+        return manager != null && manager.isAdvancedProtectionEnabled();
+    }
+
     // Si l'utilisateur a activé Advanced Protection (Android 16), aucune option de relâchement n'est proposée.
     public ShieldPolicy effective(ShieldPolicy userPolicy) {
-        if (manager != null && manager.isAdvancedProtectionEnabled()) {
+        if (active()) {
             return ShieldPolicy.hardened();
         }
         return userPolicy;

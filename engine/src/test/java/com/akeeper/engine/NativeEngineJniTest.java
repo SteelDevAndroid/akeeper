@@ -63,7 +63,7 @@ class NativeEngineJniTest {
             engineSide = server.accept();
         }
         upstream = new ServerSocket(0, 5, InetAddress.getByAddress(LOOPBACK));
-        engine = NativeEngine.start(rawFd(engineSide), -1, -1, host);
+        engine = NativeEngine.start(rawFd(engineSide), -1, -1, -1, host);
     }
 
     @AfterEach
@@ -111,10 +111,38 @@ class NativeEngineJniTest {
 
     @Test
     void replacesTheRulesAndCountsPackets() throws Exception {
-        assertThat(engine.setRules(-1, -1)).isTrue();
+        assertThat(engine.setRules(-1, -1, -1)).isTrue();
         app.write(ByteBuffer.wrap(new byte[]{0x45}));
         await(() -> engine.counter(NativeEngine.Counter.MALFORMED) == 1);
         assertThat(engine.counter(NativeEngine.Counter.PACKETS)).isEqualTo(1);
+    }
+
+    @Test
+    void journalsAppFirewallRefusalsOnlyWhileLoggingIsOn() throws Exception {
+        assertThat(engine.setBlockedUids(new int[]{10_123})).isTrue();
+        app.write(ByteBuffer.wrap(tcpPacket(40_003, upstream.getLocalPort(), 4000, 0, SYN)));
+        readPacket();
+        assertThat(engine.drainEvents()).as("journal coupé par défaut").isEmpty();
+
+        assertThat(engine.setLogging(true)).isTrue();
+        app.write(ByteBuffer.wrap(tcpPacket(40_004, upstream.getLocalPort(), 5000, 0, SYN)));
+        readPacket();
+
+        assertThat(engine.drainEvents()).singleElement().satisfies(event -> {
+            assertThat(event.kind()).isEqualTo(FlowEvent.Kind.APP);
+            assertThat(event.blocked()).isTrue();
+            assertThat(event.reason()).isEqualTo(FlowEvent.Reason.APP_FIREWALL);
+            assertThat(event.uid()).isEqualTo(10_123);
+            assertThat(event.name()).isEqualTo("127.0.0.1");
+        });
+        assertThat(engine.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void drainsTrafficOnlyWhileLoggingIsOn() {
+        assertThat(engine.drainTraffic()).isEmpty();
+        assertThat(engine.setLogging(true)).isTrue();
+        assertThat(engine.drainTraffic()).isEmpty();
     }
 
     @Test
@@ -131,6 +159,9 @@ class NativeEngineJniTest {
         assertThat(engine.resume()).isFalse();
         assertThat(engine.counter(NativeEngine.Counter.PACKETS)).isEqualTo(-1);
         assertThat(engine.setBlockedUids(new int[0])).isFalse();
+        assertThat(engine.setLogging(true)).isFalse();
+        assertThat(engine.drainEvents()).isEmpty();
+        assertThat(engine.drainTraffic()).isEmpty();
         engine.close();
     }
 

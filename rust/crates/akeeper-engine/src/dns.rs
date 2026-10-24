@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use akeeper_proto::dns::{self, Query, Rcode};
+use akeeper_proto::ip::PROTO_UDP;
 use akeeper_proto::udp::Datagram;
 
-use std::sync::Arc;
-
-use crate::filter::Filter;
+use crate::SharedHost;
+use crate::events::{EventKind, EventLog};
+use crate::filter::{Filter, Reason};
 use crate::stats::{Counter, Stats};
 
 pub const MAX_UPSTREAMS: usize = 4;
@@ -34,15 +36,19 @@ struct Pending {
 
 pub struct Resolver {
     filter: Arc<Filter>,
+    host: SharedHost,
+    events: Arc<EventLog>,
     upstreams: [Option<UdpSocket>; MAX_UPSTREAMS],
     next_upstream: usize,
     pending: HashMap<u16, Pending>,
 }
 
 impl Resolver {
-    pub(crate) fn new(filter: Arc<Filter>) -> Self {
+    pub(crate) fn new(filter: Arc<Filter>, host: SharedHost, events: Arc<EventLog>) -> Self {
         Self {
             filter,
+            host,
+            events,
             upstreams: Default::default(),
             next_upstream: 0,
             pending: HashMap::new(),
@@ -93,7 +99,13 @@ impl Resolver {
         if query.qtype == dns::TYPE_HTTPS {
             return Outcome::Reply(negative(&query, Rcode::NoError));
         }
-        if query.name == DOH_CANARY || self.filter.blocks(&query.name) {
+        let verdict = if query.name == DOH_CANARY {
+            Some(Reason::Evasion)
+        } else {
+            self.filter.verdict(&query.name)
+        };
+        self.journal(datagram, &query.name, verdict);
+        if verdict.is_some() {
             stats.add(Counter::DnsBlocked, 1);
             return Outcome::Reply(negative(&query, Rcode::NxDomain));
         }
@@ -103,6 +115,21 @@ impl Resolver {
             stats.add(Counter::DnsUpstreamFailures, 1);
             Outcome::Reply(negative(&query, Rcode::ServFail))
         }
+    }
+
+    /// Journal d'activité. Le propriétaire n'est cherché que si le journal est actif : c'est un appel Binder.
+    fn journal(&self, datagram: &Datagram<'_>, name: &str, verdict: Option<Reason>) {
+        if !self.events.enabled() {
+            return;
+        }
+        let uid = self.host.owner_uid(PROTO_UDP, datagram.src, datagram.dst);
+        self.events.record(
+            EventKind::Dns,
+            verdict.is_some(),
+            verdict.map_or(0, Reason::code),
+            uid,
+            name,
+        );
     }
 
     fn forward(&mut self, query: &Query<'_>, datagram: &Datagram<'_>, now: Instant) -> bool {

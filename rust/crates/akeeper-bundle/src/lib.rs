@@ -1,9 +1,11 @@
 //! Construction et signature des bundles de règles, côté pipeline (jamais embarqué dans l'app).
 //! La clé privée ne quitte pas la machine de signature : l'app ne contient que les clés publiques.
 
+pub mod sources;
+
 use std::net::IpAddr;
 
-use akeeper_engine::{Blocklist, BundleRules, RulesError};
+use akeeper_engine::{Blocklist, BundleRules, CategoryMask, RulesError};
 use akeeper_proto::bundle::{self, BundleError, Section, category, kind};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 
@@ -114,7 +116,7 @@ pub fn verify(bytes: &[u8], public_keys: &[VerifyingKey]) -> Result<u64, Error> 
     let signature = Signature::from_slice(envelope.signature).map_err(|_| Error::BadSignature)?;
     key.verify(envelope.signed, &signature)
         .map_err(|_| Error::BadSignature)?;
-    BundleRules::parse(bytes).map_err(Error::Rules)?;
+    BundleRules::parse(bytes, CategoryMask::ALL).map_err(Error::Rules)?;
     Ok(envelope.version)
 }
 
@@ -200,7 +202,12 @@ mod tests {
             "key_id 1 désigne la seconde clé"
         );
 
-        assert_eq!(BundleRules::parse(&bytes).unwrap().version(), 5);
+        assert_eq!(
+            BundleRules::parse(&bytes, CategoryMask::ALL)
+                .unwrap()
+                .version(),
+            5
+        );
 
         let mut tampered = bytes.clone();
         tampered[20] ^= 1;
@@ -210,7 +217,12 @@ mod tests {
     #[test]
     fn an_unsigned_bundle_loads_in_the_engine_but_never_verifies() {
         let bytes = build_unsigned(1_761_220_000, &fixture_sources()).unwrap();
-        assert_eq!(BundleRules::parse(&bytes).unwrap().version(), 0);
+        assert_eq!(
+            BundleRules::parse(&bytes, CategoryMask::ALL)
+                .unwrap()
+                .version(),
+            0
+        );
         let key = signing_key(&TEST_SEED).verifying_key();
         assert!(matches!(
             verify(&bytes, &[key, key]),
