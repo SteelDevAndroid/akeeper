@@ -34,6 +34,8 @@ jobs:
           RULES_KEY_ID: ${{ vars.RULES_KEY_ID }}
           RULES_PUBLIC_KEYS: ${{ vars.RULES_PUBLIC_KEYS }}
           URLHAUS_AUTH_KEY: ${{ secrets.URLHAUS_AUTH_KEY }}
+          ALLOW_LIST_URL: ${{ vars.ALLOW_LIST_URL }}
+          ALLOW_LIST_NOTICE: ${{ vars.ALLOW_LIST_NOTICE }}
         run: scripts/build-rules.sh site
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -33,6 +33,8 @@ pub struct Sources {
     pub phishing: Option<String>,
     pub doh: Option<String>,
     pub doh_ips: Option<String>,
+    /// Exclusions : noms jamais bloqués par les catégories.
+    pub allow: Option<String>,
     pub notice: Option<String>,
 }
 
@@ -72,6 +74,7 @@ fn message(key_id: u8, version: u64, created_at: u64, sources: &Sources) -> Resu
         (category::MALWARE, &sources.malware),
         (category::PHISHING, &sources.phishing),
         (category::DOH, &sources.doh),
+        (category::ALLOW, &sources.allow),
     ]
     .into_iter()
     .filter_map(|(cat, text)| text.as_deref().map(|t| (cat, Blocklist::from_domains(t))))

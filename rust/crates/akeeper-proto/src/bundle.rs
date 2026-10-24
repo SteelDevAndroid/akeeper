@@ -36,6 +36,8 @@ pub mod category {
     pub const PHISHING: u8 = 3;
     /// Résolveurs DNS-over-HTTPS publics : noms (SNI, DNS) et adresses.
     pub const DOH: u8 = 4;
+    /// Exclusions : noms jamais bloqués par les catégories (liste blanche). Ce n'est pas une catégorie de blocage.
+    pub const ALLOW: u8 = 5;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

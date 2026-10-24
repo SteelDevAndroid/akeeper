@@ -76,6 +76,8 @@ pub struct BundleRules {
     version: u64,
     domains: Vec<(u8, Blocklist)>,
     doh_domains: Option<Blocklist>,
+    /// Exclusions du bundle, en plus de celles compilées dans le moteur.
+    allow_domains: Option<Blocklist>,
     doh_ips: Vec<Cidr>,
 }
 
@@ -87,12 +89,17 @@ impl BundleRules {
             version: envelope.version,
             domains: Vec::new(),
             doh_domains: None,
+            allow_domains: None,
             doh_ips: Vec::new(),
         };
         for section in &envelope.sections {
             match (section.kind, section.category) {
                 (kind::DOMAINS, category::DOH) => {
                     rules.doh_domains = Some(Blocklist::from_fst(section.data.to_vec())?);
+                }
+                // Les exclusions ne dépendent pas du masque : elles ne bloquent rien.
+                (kind::DOMAINS, category::ALLOW) => {
+                    rules.allow_domains = Some(Blocklist::from_fst(section.data.to_vec())?);
                 }
                 (kind::DOMAINS, id) if enabled.allows(id) => rules
                     .domains
@@ -142,6 +149,8 @@ pub struct Filter {
     user: Blocklist,
     allowed: Blocklist,
     default_allowed: Blocklist,
+    /// Exclusions publiées dans le bundle, appliquées comme les exclusions par défaut.
+    bundle_allowed: Option<Blocklist>,
     domains: Vec<(u8, Blocklist)>,
     doh: Blocklist,
     doh_ips: Vec<Cidr>,
@@ -157,6 +166,7 @@ impl Filter {
                 user,
                 allowed: Blocklist::empty(),
                 default_allowed: Blocklist::from_domains(DEFAULT_ALLOWED),
+                bundle_allowed: b.allow_domains,
                 domains: b.domains,
                 doh: b
                     .doh_domains
@@ -168,6 +178,7 @@ impl Filter {
                 user,
                 allowed: Blocklist::empty(),
                 default_allowed: Blocklist::from_domains(DEFAULT_ALLOWED),
+                bundle_allowed: None,
                 domains: Vec::new(),
                 doh: Blocklist::from_domains(DOH_HOSTS),
                 doh_ips: Vec::new(),
@@ -206,7 +217,9 @@ impl Filter {
         if self.user.blocks(name) {
             return Some(Reason::Personal);
         }
-        if self.default_allowed.blocks(name) {
+        if self.default_allowed.blocks(name)
+            || self.bundle_allowed.as_ref().is_some_and(|l| l.blocks(name))
+        {
             return None;
         }
         self.domains
@@ -285,6 +298,47 @@ pub(crate) mod tests {
         let mut bytes = bundle::signed_message(0, 7, 0, &sections).unwrap();
         bytes.extend_from_slice(&[0; SIGNATURE_LEN]);
         bytes
+    }
+
+    #[test]
+    fn bundle_exclusions_beat_categories_whatever_the_mask_but_not_doh_or_the_user() {
+        let ads = Blocklist::from_domains("ads.example\nshop.example\n");
+        let allow = Blocklist::from_domains("shop.example\ndns.google\n");
+        let sections = [
+            Section {
+                kind: kind::DOMAINS,
+                category: category::ADS,
+                data: ads.as_bytes(),
+            },
+            Section {
+                kind: kind::DOMAINS,
+                category: category::ALLOW,
+                data: allow.as_bytes(),
+            },
+        ];
+        let mut bytes = bundle::signed_message(0, 7, 0, &sections).unwrap();
+        bytes.extend_from_slice(&[0; SIGNATURE_LEN]);
+
+        // Le masque désactive la catégorie 5 (exclusions) : sans effet, elle ne bloque rien.
+        let mask = CategoryMask::from_bits(!(1u32 << category::ALLOW));
+        let filter = Filter::new(
+            Blocklist::empty(),
+            Some(BundleRules::parse(&bytes, mask).unwrap()),
+        );
+        assert!(filter.blocks("ads.example"));
+        assert!(!filter.blocks("shop.example"), "exclu du bundle");
+        assert!(!filter.blocks("m.shop.example"));
+        assert!(
+            filter.blocks("dns.google"),
+            "le contournement DNS n'est jamais rouvert"
+        );
+
+        let (user, _) = Blocklist::personal("shop.example\n");
+        let filter = Filter::new(
+            user,
+            Some(BundleRules::parse(&bytes, CategoryMask::ALL).unwrap()),
+        );
+        assert_eq!(filter.verdict("shop.example"), Some(Reason::Personal));
     }
 
     fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {

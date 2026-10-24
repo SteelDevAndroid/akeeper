@@ -38,8 +38,9 @@ Chaque section commence par `kind u8, category u8, 0u16, len u32`, suivis de `le
 | 2 `CIDRS` | plages de 17 octets : préfixe sur l'espace IPv6 (l'IPv4 est stockée en `::ffff:a.b.c.d`, préfixe + 96), puis l'adresse | IP des résolveurs DoH : RST sur TCP/443 |
 | 3 `NOTICE` | texte UTF-8 : sources, licences, liens | écran « Licences » (R1) |
 
-Catégories : 1 publicité et traqueurs, 2 malware, 3 hameçonnage, 4 DoH.
+Catégories : 1 publicité et traqueurs, 2 malware, 3 hameçonnage, 4 DoH, 5 exclusions (liste blanche).
 - Un type ou une catégorie inconnus sont ignorés, ce qui laisse un bundle plus récent fonctionner sur une ancienne app.
+- Les exclusions (`DOMAINS`/5) ne bloquent rien : leurs noms, sous-domaines compris, échappent aux catégories, en plus de ceux compilés dans le moteur (`rules/sources/default-allow.txt`). Elles ne dépendent pas du choix des catégories, et ni la liste personnelle ni le contournement DNS ne sont rouverts.
 - Une liste DoH (`DOMAINS`/4) présente dans le bundle remplace la liste provisoire embarquée dans le moteur.
 - Toutes les catégories sont appliquées pour l'instant ; le choix par catégorie arrive avec l'écran R2.
 
@@ -89,6 +90,7 @@ cargo run -p akeeper-bundle -- verify bundle.akrb <clé0 hex> <clé1 hex>
 | Publicité et traqueurs | HaGeZi LIGHT | GPL-3.0 |
 | Hameçonnage | Phishing Army | une liste de moins de 10 000 domaines est refusée |
 | Malware | URLhaus (`recent.csv`, URL « online ») | hôtes seulement, sans adresse IP ; les hôtes sous un domaine du top 100 000 Tranco sont écartés ; **catégorie omise** sans `URLHAUS_AUTH_KEY` |
+| Exclusions | `rules/sources/default-allow.txt`, plus la liste de la variable `ALLOW_LIST_URL` si elle est lisible | une liste blanche externe en panne n'empêche pas la publication ; sa source est ajoutée à la `NOTICE` via `ALLOW_LIST_NOTICE` |
 | DoH | `rules/sources/doh-hosts.txt` et `doh-ips.txt` | fichiers versionnés, aussi compilés dans le moteur comme repli |
 
 - **Garde-fous** : HaGeZi sous 30 000 domaines ou Phishing Army sous 10 000 font échouer le job, car une source tronquée ferait perdre la protection à tous les appareils. Une panne d'URLhaus ou de Tranco n'empêche pas la publication, elle retire seulement la catégorie malware.
@@ -102,6 +104,7 @@ cargo run -p akeeper-bundle -- verify bundle.akrb <clé0 hex> <clé1 hex>
    - secret `RULES_SEED_B64` : `base64 -w0 cle0.seed` ;
    - secret `URLHAUS_AUTH_KEY` (facultatif) ;
    - variable `RULES_PUBLIC_KEYS` : les clés publiques hex, séparées par une virgule ;
+   - variables facultatives `ALLOW_LIST_URL` (liste blanche supplémentaire, un domaine par ligne) et `ALLOW_LIST_NOTICE` (source et licence affichées dans Licences) ;
    - variable `RULES_KEY_ID` : `0` ou `1`, la position de la clé qui signe.
 3. Settings › Pages › Source : **GitHub Actions**, puis lancer le workflow `rules` à la main une première fois.
 4. Dans `gradle.properties`, renseigner **les mêmes clés** (`akeeper.rulePublicKeys`) et `akeeper.rulesUrl=https://<compte>.github.io/<dépôt>/bundle.akrb`. Sans les clés, l'app n'accepte aucun bundle ; avec d'autres clés, elle les refuse tous.
