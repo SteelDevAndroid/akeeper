@@ -31,7 +31,7 @@ Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. 
 - **`protect()`** : il passe par un rappel JNI vers `NativeEngine.Host`. Un socket que le système refuse de protéger n'émet jamais.
 
 Écarts et limites :
-- **Réseau local** : pas d'exclusion LAN, l'option opt-in (R1) n'existe pas encore, et `AdvancedProtectionPolicy` n'est donc pas encore branchée. Tout le LAN passe par le filtre, ce qui reste le comportement par défaut voulu.
+- **Réseau local** : exclu du tunnel seulement si l'utilisateur l'active dans R1 (voir « Réseau local (R1) » plus bas) ; par défaut, tout le LAN passe par le filtre.
 - **Fragments IPv4** : abandonnés, au risque de casser de rares protocoles UDP qui envoient des datagrammes de plus de 1 472 octets.
 - **DNS/TCP vers le résolveur** : réinitialisé. Une réponse DNS tronquée en UDP échoue donc au lieu de se replier sur TCP.
 - **ICMP** : ni relayé ni répondu, donc `ping` ne fonctionne pas.
@@ -85,7 +85,7 @@ Pas encore livrés :
   - la ligne Verrouillage ouvre directement les réglages VPN au lieu de revenir à O4 ;
   - O6 n'a pas d'intent propre à chaque OEM, faute de pouvoir les vérifier sur appareil ;
   - R3, Licences et O6 sont des boîtes de dialogue, pas des écrans, pour rester sans Fragments.
-- **Absents, car sans fonction derrière** : réseau local (R1 : l'option n'existe pas dans le service), statistiques anonymes, bannière Protection avancée (liée à l'option réseau local).
+- **Absents, car sans fonction derrière** : statistiques anonymes, bannière Protection avancée (l'option réseau local est seulement verrouillée, sans bannière).
 
 **Pause 15 minutes livrée (A1)** :
 - **Accueil** : l'état vert propose **Pause 15 min**. L'état ambre « En pause — reprise à HH:mm » propose **Reprendre maintenant**. La pause passe après les états dégradés (verrouillage manquant, DNS privé strict) dans l'ordre de priorité, comme dans la table de `docs/ui-ecrans.md`.
