@@ -6,30 +6,9 @@ use akeeper_proto::bundle::{self, BundleError, category, kind};
 
 use crate::Blocklist;
 
-/// Points d'accès DoH publics les plus répandus. Repli embarqué, utilisé seulement tant qu'aucun bundle signé
-/// ne fournit sa propre liste DoH.
-const DOH_HOSTS: &str = "
-cloudflare-dns.com
-one.one.one.one
-dns.google
-dns.quad9.net
-dns9.quad9.net
-dns10.quad9.net
-dns11.quad9.net
-doh.opendns.com
-doh.familyshield.opendns.com
-dns.adguard-dns.com
-dns.adguard.com
-dns.nextdns.io
-doh.cleanbrowsing.org
-doh.mullvad.net
-dns.mullvad.net
-freedns.controld.com
-dns.controld.com
-doh.dns.sb
-dns.alidns.com
-doh.pub
-";
+/// Points d'accès DoH publics, repli utilisé tant qu'aucun bundle ne fournit sa propre liste DoH. Même fichier que
+/// celui que publie le pipeline de règles (`rules/sources/doh-hosts.txt`).
+const DOH_HOSTS: &str = include_str!("../../../../rules/sources/doh-hosts.txt");
 
 #[derive(Debug)]
 pub enum RulesError {
@@ -320,6 +299,9 @@ pub(crate) mod tests {
         let filter = Filter::new(Blocklist::empty(), Some(rules));
         assert!(filter.blocks("googlesyndication.com"));
         assert!(filter.blocks("pagead2.googlesyndication.com"));
+        // La liste intégrée porte aussi les points d'accès et les adresses DoH du fichier partagé.
+        assert!(filter.blocks("dns.google") && filter.blocks_ip(v4(8, 8, 8, 8)));
+        assert!(!filter.blocks_ip(v4(93, 184, 216, 34)));
         for site in [
             "example.org",
             "wikipedia.org",

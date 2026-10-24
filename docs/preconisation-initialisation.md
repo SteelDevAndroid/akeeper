@@ -98,6 +98,12 @@ Pas encore livrés :
 - **Écart n°7** : cette liste n'est pas signée Ed25519, son authenticité est celle de l'APK. Elle ne peut pas servir de mise à jour, et les bundles téléchargés restent tous vérifiés.
 - Phishing Army et URLhaus restent à intégrer avec les bundles signés (licence et accord à régler).
 
+**Pipeline de règles livré** (`scripts/build-rules.sh`, `.github/workflows/rules.yml`, `akeeper-bundle urlhaus`) :
+- Il construit un bundle signé avec les catégories publicité (HaGeZi LIGHT), hameçonnage (Phishing Army), malware (URLhaus, s'il a sa clé) et DoH (fichiers `rules/sources/`), le revérifie avec les clés publiques de l'app, puis le publie sur GitHub Pages toutes les 6 h.
+- L'extraction URLhaus écarte les adresses IP et les hôtes sous un domaine du top 100 000 Tranco.
+- **Non essayé** : le téléchargement réel d'URLhaus, faute de clé, et la publication sur Pages. Le script a été exécuté ici sur de vraies listes HaGeZi et Phishing Army, avec une clé de test.
+- **À faire par le porteur** : clés, secrets, variables, Pages (voir `docs/bundle-regles.md`).
+
 Restent pour J5 :
 - **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
 - **Pinning TLS** du serveur de règles.

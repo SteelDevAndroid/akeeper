@@ -1,0 +1,42 @@
+name: rules
+
+# Construit et publie le bundle de règles signé (docs/bundle-regles.md). Inactif tant que la variable RULES_PUBLIC_KEYS
+# n'est pas définie : une signature ne se fait qu'avec la graine du secret RULES_SEED_B64, jamais avec une clé du dépôt.
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: rules
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: vars.RULES_PUBLIC_KEYS != ''
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Construire, signer et revérifier le bundle
+        env:
+          RULES_SEED_B64: ${{ secrets.RULES_SEED_B64 }}
+          RULES_KEY_ID: ${{ vars.RULES_KEY_ID }}
+          RULES_PUBLIC_KEYS: ${{ vars.RULES_PUBLIC_KEYS }}
+          URLHAUS_AUTH_KEY: ${{ secrets.URLHAUS_AUTH_KEY }}
+        run: scripts/build-rules.sh site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

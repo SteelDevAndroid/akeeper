@@ -80,8 +80,35 @@ cargo run -p akeeper-bundle -- build --seed cle0.seed --key-id 0 --version 42 \
 cargo run -p akeeper-bundle -- verify bundle.akrb <clé0 hex> <clé1 hex>
 ```
 
+## Pipeline de publication
+
+`scripts/build-rules.sh <dossier>` construit `bundle.akrb`, le signe et le **revérifie avec les clés publiques de l'app** avant de le laisser sortir. `.github/workflows/rules.yml` l'exécute toutes les 6 h et le publie sur GitHub Pages ; le workflow reste inactif tant que la variable `RULES_PUBLIC_KEYS` est vide.
+
+| Catégorie | Source | Notes |
+|---|---|---|
+| Publicité et traqueurs | HaGeZi LIGHT | GPL-3.0 |
+| Hameçonnage | Phishing Army | une liste de moins de 10 000 domaines est refusée |
+| Malware | URLhaus (`recent.csv`, URL « online ») | hôtes seulement, sans adresse IP ; les hôtes sous un domaine du top 100 000 Tranco sont écartés ; **catégorie omise** sans `URLHAUS_AUTH_KEY` |
+| DoH | `rules/sources/doh-hosts.txt` et `doh-ips.txt` | fichiers versionnés, aussi compilés dans le moteur comme repli |
+
+- **Garde-fous** : HaGeZi sous 30 000 domaines ou Phishing Army sous 10 000 font échouer le job, car une source tronquée ferait perdre la protection à tous les appareils. Une panne d'URLhaus ou de Tranco n'empêche pas la publication, elle retire seulement la catégorie malware.
+- **Version** : l'heure Unix de la construction, donc monotone (anti-rollback).
+- **Clé URLhaus** : elle fait partie de l'URL de téléchargement. Le script n'utilise pas `-v`, et `--fail` évite que curl n'affiche l'URL en cas d'erreur. Le point d'accès `urlhaus-api.abuse.ch/v2/files/exports/<clé>/recent.csv` vient de la documentation d'abuse.ch ; il n'a pas pu être essayé sans clé.
+- **Mise à jour conditionnelle** : GitHub Pages date le fichier de son déploiement, postérieur au `created_at` du bundle. L'app reçoit donc un 200 à chaque passage, puis constate que la version est déjà connue. Cela coûte un téléchargement de 2,5 Mo toutes les 12 h par appareil.
+
+### À faire par le porteur du projet
+1. Générer la clé **hors ligne** : `cargo run -p akeeper-bundle -- keygen /chemin/hors-depot/cle0.seed`. La commande affiche la clé publique. Une seconde clé sert à la rotation.
+2. Dans Settings › Secrets and variables › Actions :
+   - secret `RULES_SEED_B64` : `base64 -w0 cle0.seed` ;
+   - secret `URLHAUS_AUTH_KEY` (facultatif) ;
+   - variable `RULES_PUBLIC_KEYS` : les clés publiques hex, séparées par une virgule ;
+   - variable `RULES_KEY_ID` : `0` ou `1`, la position de la clé qui signe.
+3. Settings › Pages › Source : **GitHub Actions**, puis lancer le workflow `rules` à la main une première fois.
+4. Dans `gradle.properties`, renseigner **les mêmes clés** (`akeeper.rulePublicKeys`) et `akeeper.rulesUrl=https://<compte>.github.io/<dépôt>/bundle.akrb`. Sans les clés, l'app n'accepte aucun bundle ; avec d'autres clés, elle les refuse tous.
+5. Archiver l'accord d'abuse.ch avant d'activer la catégorie malware.
+
 ## Pas encore fait
 
-- **Serveur** : il n'existe pas encore. Sans `akeeper.rulesUrl`, la mise à jour n'est pas planifiée.
+- **Serveur** : le pipeline existe, mais il n'est pas activé tant que les étapes ci-dessus ne sont pas faites. Sans `akeeper.rulesUrl`, la mise à jour n'est pas planifiée.
 - **Pinning TLS** du serveur (spec §5) : il viendra avec les vrais certificats. L'intégrité repose sur Ed25519, pas sur TLS.
 - **Bundle embarqué** dans l'APK pour le premier démarrage : il faut d'abord la clé de production.

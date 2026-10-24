@@ -1,6 +1,8 @@
 //! Construction et signature des bundles de règles, côté pipeline (jamais embarqué dans l'app).
 //! La clé privée ne quitte pas la machine de signature : l'app ne contient que les clés publiques.
 
+pub mod sources;
+
 use std::net::IpAddr;
 
 use akeeper_engine::{Blocklist, BundleRules, RulesError};
