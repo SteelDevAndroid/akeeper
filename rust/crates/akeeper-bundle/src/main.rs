@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use akeeper_bundle::{
-    SEED_LEN, Sources, build, parse_hex_key, public_key_hex, signing_key, verify,
+    SEED_LEN, Sources, build, build_unsigned, parse_hex_key, public_key_hex, signing_key, verify,
 };
 
 const USAGE: &str = "\
@@ -17,6 +17,7 @@ usage :
   akeeper-bundle build --seed <f> --key-id <0|1> --version <n> --out <f>
         [--created <s unix>] [--ads <f>] [--malware <f>] [--phishing <f>]
         [--doh <f>] [--doh-ips <f>] [--notice <f>]
+  akeeper-bundle build-unsigned --out <f> [--created <s unix>] [mêmes listes]   liste intégrée à l'APK (version 0)
   akeeper-bundle verify <bundle> <clé 0 hex> [<clé 1 hex>]";
 
 fn main() -> ExitCode {
@@ -53,7 +54,8 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("{}", public_key_hex(&signing_key(&seed)));
             Ok(())
         }
-        "build" => build_command(rest),
+        "build" => build_command(rest, true),
+        "build-unsigned" => build_command(rest, false),
         "verify" => {
             let (path, keys) = rest.split_first().ok_or(USAGE)?;
             let keys = keys
@@ -69,7 +71,7 @@ fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn build_command(args: &[String]) -> Result<(), String> {
+fn build_command(args: &[String], signed: bool) -> Result<(), String> {
     let mut seed = None;
     let mut key_id = None;
     let mut version = None;
@@ -97,7 +99,7 @@ fn build_command(args: &[String]) -> Result<(), String> {
             _ => return Err(USAGE.into()),
         }
     }
-    let (Some(seed), Some(key_id), Some(version), Some(out)) = (seed, key_id, version, out) else {
+    let Some(out) = out else {
         return Err(USAGE.into());
     };
     let created = match created {
@@ -107,13 +109,20 @@ fn build_command(args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .as_secs(),
     };
-    let bytes = build(&signing_key(&seed), key_id, version, created, &sources)
-        .map_err(|e| format!("construction impossible : {e:?}"))?;
+    let bytes = if signed {
+        let (Some(seed), Some(key_id), Some(version)) = (seed, key_id, version) else {
+            return Err(USAGE.into());
+        };
+        build(&signing_key(&seed), key_id, version, created, &sources)
+    } else {
+        if seed.is_some() || key_id.is_some() || version.is_some() {
+            return Err("build-unsigned n'accepte ni graine, ni clé, ni version".into());
+        }
+        build_unsigned(created, &sources)
+    }
+    .map_err(|e| format!("construction impossible : {e:?}"))?;
     fs::write(&out, &bytes).map_err(|e| format!("{out} : {e}"))?;
-    println!(
-        "{out} : {} octets, version {version}, clé {key_id}",
-        bytes.len()
-    );
+    println!("{out} : {} octets", bytes.len());
     Ok(())
 }
 

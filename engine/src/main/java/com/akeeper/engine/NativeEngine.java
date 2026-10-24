@@ -94,6 +94,19 @@ public final class NativeEngine implements AutoCloseable {
         return nativeSetRules(handle, blocklistFd, bundleFd) == 0;
     }
 
+    /**
+     * Suspend les blocages de noms, de SNI et d'adresses DoH pendant {@code durationMillis} (le moteur plafonne la
+     * durée et reprend de lui-même). Le pare-feu par app et la neutralisation de l'évasion restent actifs.
+     */
+    public synchronized boolean pause(long durationMillis) {
+        return handle != 0 && durationMillis > 0 && nativePause(handle, durationMillis) == 0;
+    }
+
+    /** Rétablit les blocages sans attendre la fin de la pause. */
+    public synchronized boolean resume() {
+        return handle != 0 && nativePause(handle, 0) == 0;
+    }
+
     /** Renvoie -1 une fois le moteur arrêté. */
     public synchronized long counter(Counter counter) {
         return handle == 0 ? -1 : nativeCounter(handle, counter.ordinal());
@@ -120,6 +133,8 @@ public final class NativeEngine implements AutoCloseable {
     private static native long nativeStart(int tunFd, int blocklistFd, int bundleFd, Host host);
 
     private static native int nativeSetRules(long handle, int blocklistFd, int bundleFd);
+
+    private static native int nativePause(long handle, long millis);
 
     private static native int nativeSetUpstream(long handle, int slot, int fd);
 

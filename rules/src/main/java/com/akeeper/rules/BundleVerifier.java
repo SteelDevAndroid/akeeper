@@ -70,7 +70,11 @@ public final class BundleVerifier {
         return Optional.empty();
     }
 
-    public RuleBundle verify(byte[] bundle) throws GeneralSecurityException {
+    /**
+     * Contrôle l'enveloppe sans vérifier la signature : pour la liste intégrée à l'APK, dont l'authenticité est celle
+     * de l'APK. Un bundle téléchargé passe toujours par {@link #verify}.
+     */
+    public static RuleBundle parse(byte[] bundle) throws GeneralSecurityException {
         if (bundle.length < HEADER_LEN + SIGNATURE_LEN || bundle.length > MAX_BUNDLE) {
             throw new GeneralSecurityException("taille de bundle invalide");
         }
@@ -90,12 +94,20 @@ public final class BundleVerifier {
             throw new GeneralSecurityException("enveloppe de bundle invalide");
         }
         // Les versions au-delà de Long.MAX_VALUE sont refusées plutôt que comparées en signé.
-        if (version < 0 || keyId >= keys.size()) {
-            throw new GeneralSecurityException("version ou clé de bundle invalide");
+        if (version < 0) {
+            throw new GeneralSecurityException("version de bundle invalide");
+        }
+        return new RuleBundle(keyId, version, createdAt);
+    }
+
+    public RuleBundle verify(byte[] bundle) throws GeneralSecurityException {
+        var parsed = parse(bundle);
+        if (parsed.keyId() >= keys.size()) {
+            throw new GeneralSecurityException("clé de bundle inconnue");
         }
         int signed = bundle.length - SIGNATURE_LEN;
         // Copie transitoire (≤ 32 Mio) : l'API Tink ne prend pas de sous-tableau.
-        keys.get(keyId).verify(Arrays.copyOfRange(bundle, signed, bundle.length), Arrays.copyOf(bundle, signed));
-        return new RuleBundle(keyId, version, createdAt);
+        keys.get(parsed.keyId()).verify(Arrays.copyOfRange(bundle, signed, bundle.length), Arrays.copyOf(bundle, signed));
+        return parsed;
     }
 }

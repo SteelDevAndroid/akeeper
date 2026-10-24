@@ -41,7 +41,7 @@ class RuleUpdaterTest {
     @BeforeEach
     void setUp() throws Exception {
         key = Ed25519Sign.KeyPair.newKeyPair();
-        store = new RuleStore(dir, new BundleVerifier(List.of(key.getPublicKey())), 0);
+        store = new RuleStore(dir, new BundleVerifier(List.of(key.getPublicKey())), 0, RuleStore.Embedded.NONE);
         updater = new RuleUpdater(store, target -> connection);
         url = URI.create("https://rules.example/bundle.akrb").toURL();
     }

@@ -7,6 +7,7 @@ use std::net::UdpSocket;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::time::Duration;
 
 use std::net::{IpAddr, SocketAddr};
 use std::os::fd::RawFd;
@@ -162,6 +163,32 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeSetRule
         engine.set_filter(filter)
     }));
     match applied {
+        Ok(Ok(())) => 0,
+        _ => -1,
+    }
+}
+
+/// Suspend les blocages pour `millis` (plafonné par le moteur) ; `millis` <= 0 les rétablit aussitôt.
+/// Renvoie 0 si accepté, -1 sinon.
+///
+/// # Safety
+/// `handle` vient de `nativeStart` et n'a pas encore été passé à `nativeStop` (garanti par le verrou Java).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativePause(
+    _env: *mut JniEnv,
+    _class: *mut JClass,
+    handle: JLong,
+    millis: JLong,
+) -> JInt {
+    // SAFETY: contrat de la fonction ; lecture seule via &Engine.
+    let Some(engine) = (unsafe { (handle as *const Engine).as_ref() }) else {
+        return -1;
+    };
+    let result = catch_unwind(AssertUnwindSafe(|| match u64::try_from(millis) {
+        Ok(ms) if ms > 0 => engine.pause(Duration::from_millis(ms)),
+        _ => engine.resume(),
+    }));
+    match result {
         Ok(Ok(())) => 0,
         _ => -1,
     }
@@ -469,10 +496,36 @@ mod tests {
     }
 
     #[test]
+    fn pauses_and_resumes() {
+        let (_app, engine_side) = UnixDatagram::pair().unwrap();
+        let handle = start_with(OwnedFd::from(engine_side), None);
+        let pause = |millis| {
+            // SAFETY: les tests n'appellent pause qu'avec 0 ou un handle pas encore arrêté.
+            unsafe {
+                Java_com_akeeper_engine_NativeEngine_nativePause(
+                    null_mut(),
+                    null_mut(),
+                    handle,
+                    millis,
+                )
+            }
+        };
+        assert_eq!(pause(60_000), 0);
+        assert_eq!(pause(0), 0);
+        assert_eq!(pause(-5), 0);
+        stop(handle);
+    }
+
+    #[test]
     fn rejects_null_handle() {
         assert_eq!(counter(0, 0), -1);
         assert_eq!(set_upstream(0, 0, -1), -1);
         assert_eq!(set_rules(0, -1, -1), -1);
+        // SAFETY: un handle nul est refusé avant tout accès.
+        let paused = unsafe {
+            Java_com_akeeper_engine_NativeEngine_nativePause(null_mut(), null_mut(), 0, 1)
+        };
+        assert_eq!(paused, -1);
         stop(0);
     }
 }

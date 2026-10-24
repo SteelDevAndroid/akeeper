@@ -11,16 +11,31 @@ import java.util.function.Consumer;
 /** État de protection publié par {@link ShieldVpnService}, observé par l'UI et la tuile. */
 public final class ShieldStatus {
 
-    /** {@code privateDnsStrict} : DNS privé en mode strict, le DNS des apps échappe au filtrage. */
-    public record Snapshot(boolean running, LockdownStatus lockdown, boolean privateDnsStrict) {
+    /**
+     * @param privateDnsStrict DNS privé en mode strict, le DNS des apps échappe au filtrage
+     * @param pausedUntil      fin de la pause en millisecondes epoch (horloge murale, pour l'affichage), 0 sans pause
+     */
+    public record Snapshot(boolean running, LockdownStatus lockdown, boolean privateDnsStrict, long pausedUntil) {
         public static final Snapshot STOPPED = new Snapshot(false, new LockdownStatus(false, false));
 
         public Snapshot(boolean running, LockdownStatus lockdown) {
-            this(running, lockdown, false);
+            this(running, lockdown, false, 0);
+        }
+
+        public Snapshot(boolean running, LockdownStatus lockdown, boolean privateDnsStrict) {
+            this(running, lockdown, privateDnsStrict, 0);
         }
 
         public Snapshot withPrivateDnsStrict(boolean strict) {
-            return new Snapshot(running, lockdown, strict);
+            return new Snapshot(running, lockdown, strict, pausedUntil);
+        }
+
+        public Snapshot withPausedUntil(long millis) {
+            return new Snapshot(running, lockdown, privateDnsStrict, millis);
+        }
+
+        public boolean paused() {
+            return pausedUntil > 0;
         }
     }
 

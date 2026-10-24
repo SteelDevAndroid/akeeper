@@ -1,4 +1,6 @@
 use std::net::IpAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use akeeper_proto::bundle::{self, BundleError, category, kind};
 
@@ -118,6 +120,9 @@ pub struct Filter {
     domains: Vec<Blocklist>,
     doh: Blocklist,
     doh_ips: Vec<Cidr>,
+    /// Pause demandée par l'utilisateur : plus aucun nom ni adresse n'est bloqué. Partagé avec le moteur, qui le
+    /// conserve d'un filtre au suivant quand les règles sont remplacées.
+    paused: Arc<AtomicBool>,
 }
 
 impl Filter {
@@ -130,25 +135,39 @@ impl Filter {
                     .doh_domains
                     .unwrap_or_else(|| Blocklist::from_domains(DOH_HOSTS)),
                 doh_ips: b.doh_ips,
+                paused: Arc::default(),
             },
             None => Self {
                 user,
                 domains: Vec::new(),
                 doh: Blocklist::from_domains(DOH_HOSTS),
                 doh_ips: Vec::new(),
+                paused: Arc::default(),
             },
         }
     }
 
+    pub(crate) fn share_pause(&mut self, paused: Arc<AtomicBool>) {
+        self.paused = paused;
+    }
+
+    fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
     /// `name` est déjà en minuscules (normalisé par le parseur DNS ou TLS).
     pub(crate) fn blocks(&self, name: &str) -> bool {
-        self.user.blocks(name)
-            || self.doh.blocks(name)
-            || self.domains.iter().any(|list| list.blocks(name))
+        !self.is_paused()
+            && (self.user.blocks(name)
+                || self.doh.blocks(name)
+                || self.domains.iter().any(|list| list.blocks(name)))
     }
 
     /// Adresse d'un résolveur DoH connu. Parcours linéaire : quelques centaines de plages, une fois par flux.
     pub(crate) fn blocks_ip(&self, ip: IpAddr) -> bool {
+        if self.is_paused() {
+            return false;
+        }
         let addr = match ip {
             IpAddr::V4(v4) => u128::from(v4.to_ipv6_mapped()),
             IpAddr::V6(v6) => u128::from(v6),
@@ -262,6 +281,55 @@ pub(crate) mod tests {
         let fst_start = bundle::HEADER_LEN + 8 + 10;
         bytes[fst_start] ^= 0xff;
         assert!(BundleRules::parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn a_pause_lifts_every_block_and_a_resume_restores_it() {
+        let bytes = bundle_bytes("tracker.example", None, &[(32, v4(192, 0, 2, 1))]);
+        let mut filter = Filter::new(
+            Blocklist::from_domains("mine.example"),
+            Some(BundleRules::parse(&bytes).unwrap()),
+        );
+        let paused = Arc::new(AtomicBool::new(false));
+        filter.share_pause(Arc::clone(&paused));
+        assert!(
+            filter.blocks("mine.example")
+                && filter.blocks("a.tracker.example")
+                && filter.blocks("dns.google")
+        );
+        assert!(filter.blocks_ip(v4(192, 0, 2, 1)));
+
+        paused.store(true, Ordering::Relaxed);
+        assert!(
+            !filter.blocks("mine.example")
+                && !filter.blocks("a.tracker.example")
+                && !filter.blocks("dns.google")
+        );
+        assert!(!filter.blocks_ip(v4(192, 0, 2, 1)));
+
+        paused.store(false, Ordering::Relaxed);
+        assert!(filter.blocks("mine.example"));
+    }
+
+    /// La liste livrée dans l'APK : elle doit se charger et bloquer sans fausse alerte sur les sites courants.
+    #[test]
+    fn the_shipped_default_list_blocks_ad_domains_and_spares_common_sites() {
+        let bytes = include_bytes!("../../../../rules/src/main/assets/default-rules.akrb");
+        let rules = BundleRules::parse(bytes).unwrap();
+        assert_eq!(rules.version(), 0);
+        let filter = Filter::new(Blocklist::empty(), Some(rules));
+        assert!(filter.blocks("googlesyndication.com"));
+        assert!(filter.blocks("pagead2.googlesyndication.com"));
+        for site in [
+            "example.org",
+            "wikipedia.org",
+            "github.com",
+            "www.google.com",
+            "mozilla.org",
+            "lemonde.fr",
+        ] {
+            assert!(!filter.blocks(site), "{site} ne doit pas être bloqué");
+        }
     }
 
     #[test]

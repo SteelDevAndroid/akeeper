@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.format.DateFormat;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Toast;
@@ -37,6 +38,7 @@ import com.google.android.material.progressindicator.LinearProgressIndicator;
 import java.io.File;
 import java.io.IOException;
 import java.text.NumberFormat;
+import java.util.Date;
 
 /** Activité unique : onboarding (O1 à O4), onglets Accueil (A1) et Apps (A2), puis Réglages (R1). Thread principal uniquement. */
 public final class MainActivity extends AppCompatActivity {
@@ -359,6 +361,12 @@ public final class MainActivity extends AppCompatActivity {
                 title.setText(R.string.home_dns_strict_title);
                 sub.setText(R.string.home_dns_strict_sub);
             }
+            case PAUSED -> {
+                title.setText(getString(R.string.home_paused_title,
+                        DateFormat.getTimeFormat(this).format(new Date(ShieldStatus.current().pausedUntil()))));
+                sub.setText(R.string.home_paused_sub);
+                levelView.setText(R.string.home_level_paused);
+            }
             case REVOKED -> {
                 title.setText(R.string.home_revoked_title);
                 sub.setText(R.string.home_revoked_sub);
@@ -370,6 +378,16 @@ public final class MainActivity extends AppCompatActivity {
         }
         switch (state.action) {
             case NONE -> action.setVisibility(View.GONE);
+            case PAUSE -> {
+                action.setVisibility(View.VISIBLE);
+                action.setText(R.string.home_pause_action);
+                action.setOnClickListener(v -> ShieldVpnService.pause(this));
+            }
+            case RESUME -> {
+                action.setVisibility(View.VISIBLE);
+                action.setText(R.string.home_resume_action);
+                action.setOnClickListener(v -> ShieldVpnService.resume(this));
+            }
             case ENABLE_LOCKDOWN -> {
                 action.setVisibility(View.VISIBLE);
                 action.setText(R.string.home_no_lockdown_action);

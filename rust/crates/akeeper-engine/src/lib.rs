@@ -20,6 +20,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -67,12 +68,18 @@ enum Command {
     SetUpstream(usize, Option<UdpSocket>),
     SetBlockedUids(HashSet<u32>),
     SetFilter(Arc<Filter>),
+    /// `Some` : pause des blocages pour cette durée ; `None` : reprise immédiate.
+    SetPause(Option<Duration>),
 }
+
+/// Une pause ne dure jamais plus : l'appelant ne peut pas laisser la protection suspendue indéfiniment.
+pub const MAX_PAUSE: Duration = Duration::from_secs(60 * 60);
 
 pub struct Engine {
     commands: Sender<Command>,
     waker: Arc<Waker>,
     stats: Arc<Stats>,
+    pause: Arc<AtomicBool>,
     thread: Option<JoinHandle<io::Result<()>>>,
 }
 
@@ -86,13 +93,19 @@ impl Engine {
 
         let (commands, inbox) = mpsc::channel();
         let stats = Arc::new(Stats::default());
+        let pause = Arc::new(AtomicBool::new(false));
+        let mut filter = config.filter;
+        filter.share_pause(Arc::clone(&pause));
         let thread = thread::Builder::new()
             .name("akeeper-engine".into())
             .spawn({
                 let stats = Arc::clone(&stats);
+                let pause = Arc::clone(&pause);
                 move || {
-                    let filter = Arc::new(config.filter);
+                    let filter = Arc::new(filter);
                     let flows = Flows {
+                        pause,
+                        paused_until: None,
                         resolver: Resolver::new(Arc::clone(&filter)),
                         nat: UdpNat::new(Arc::clone(&config.host)),
                         tcp: TcpStack::new(config.host, random_seed(), filter),
@@ -106,6 +119,7 @@ impl Engine {
             commands,
             waker,
             stats,
+            pause,
             thread: Some(thread),
         })
     }
@@ -128,8 +142,21 @@ impl Engine {
 
     /// Remplace les règles d'un bloc. Le filtre est construit par l'appelant, hors du thread moteur ; les flux
     /// encore en inspection SNI sont jugés avec les nouvelles règles.
-    pub fn set_filter(&self, filter: Filter) -> io::Result<()> {
+    pub fn set_filter(&self, mut filter: Filter) -> io::Result<()> {
+        // Une pause en cours survit au remplacement des règles.
+        filter.share_pause(Arc::clone(&self.pause));
         self.send(Command::SetFilter(Arc::new(filter)))
+    }
+
+    /// Suspend les blocages (noms, SNI, adresses DoH) pour `duration`, plafonnée à `MAX_PAUSE`, puis les rétablit
+    /// d'elle-même : le moteur n'attend aucun appel pour reprendre. Le pare-feu par app et la neutralisation de
+    /// l'évasion (NODATA type 65, canari DoH, QUIC) restent actifs.
+    pub fn pause(&self, duration: Duration) -> io::Result<()> {
+        self.send(Command::SetPause(Some(duration.min(MAX_PAUSE))))
+    }
+
+    pub fn resume(&self) -> io::Result<()> {
+        self.send(Command::SetPause(None))
     }
 
     pub fn stats(&self) -> &Stats {
@@ -169,6 +196,9 @@ impl Drop for Engine {
 
 /// État réseau détenu par le thread moteur seul : aucun verrou nécessaire.
 struct Flows {
+    /// Même drapeau que dans le filtre ; seul le thread moteur l'écrit.
+    pause: Arc<AtomicBool>,
+    paused_until: Option<Instant>,
     resolver: Resolver,
     nat: UdpNat,
     tcp: TcpStack,
@@ -198,16 +228,26 @@ fn run(
     loop {
         let tick = (flows.resolver.has_pending() || flows.nat.has_flows() || flows.tcp.has_flows())
             .then_some(EXPIRY_TICK);
-        let timeout = match (tick, flows.tcp.poll_delay()) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        let timeout = [
+            tick,
+            flows.tcp.poll_delay(),
+            flows
+                .paused_until
+                .map(|t| t.saturating_duration_since(Instant::now())),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         match poll.poll(&mut events, timeout) {
             Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         }
         let now = Instant::now();
+        if flows.paused_until.is_some_and(|until| now >= until) {
+            flows.paused_until = None;
+            flows.pause.store(false, Ordering::Relaxed);
+        }
         flows.resolver.expire(now, stats);
         flows.nat.expire(poll.registry(), now);
         for event in &events {
@@ -230,6 +270,10 @@ fn run(
                             Command::SetFilter(filter) => {
                                 flows.resolver.set_filter(Arc::clone(&filter));
                                 flows.tcp.set_filter(filter);
+                            }
+                            Command::SetPause(duration) => {
+                                flows.paused_until = duration.map(|d| Instant::now() + d);
+                                flows.pause.store(duration.is_some(), Ordering::Relaxed);
                             }
                         }
                     }
@@ -1171,6 +1215,68 @@ mod tests {
         app.send(&to_resolver(&dns_query(5, "dns.google", 1)))
             .unwrap();
         assert_eq!(rcode(&reply(&app)), 3);
+        engine.stop().unwrap();
+    }
+
+    /// Code de réponse DNS du nom demandé, avec un identifiant neuf à chaque appel.
+    fn dns_rcode(app: &UnixDatagram, name: &str) -> u8 {
+        static NEXT_ID: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(100);
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        app.send(&to_resolver(&dns_query(id, name, 1))).unwrap();
+        rcode(&reply(app))
+    }
+
+    /// Les commandes et les paquets arrivent par deux sources distinctes : l'ordre n'est pas garanti.
+    fn eventually(app: &UnixDatagram, name: &str, expected: u8) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while dns_rcode(app, name) != expected {
+            assert!(
+                Instant::now() < deadline,
+                "rcode {expected} attendu pour {name}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn a_pause_lets_blocked_names_through_until_resumed() {
+        let (app, engine) = start("ads.example.net");
+        assert_eq!(dns_rcode(&app, "ads.example.net"), 3);
+
+        engine.pause(Duration::from_secs(600)).unwrap();
+        // Sans résolveur amont, un nom autorisé reçoit SERVFAIL : le blocage (NXDOMAIN) est bien levé.
+        eventually(&app, "ads.example.net", 2);
+
+        engine.resume().unwrap();
+        eventually(&app, "ads.example.net", 3);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn a_pause_ends_by_itself() {
+        let (app, engine) = start("ads.example.net");
+        engine.pause(Duration::from_millis(400)).unwrap();
+        eventually(&app, "ads.example.net", 2);
+        eventually(&app, "ads.example.net", 3);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn a_pause_survives_a_rules_replacement_and_keeps_the_evasion_defences() {
+        let (app, engine) = start("ads.example.net");
+        engine.pause(Duration::MAX).unwrap();
+        eventually(&app, "ads.example.net", 2);
+
+        engine
+            .set_filter(Filter::new(Blocklist::from_domains("other.example"), None))
+            .unwrap();
+        // Le canari DoH reste refusé pendant la pause ; l'ancien nom reste autorisé.
+        eventually(&app, "use-application-dns.net", 3);
+        // Le nouveau filtre bloque `other.example`, mais la pause en cours l'emporte : à aucun moment NXDOMAIN.
+        for _ in 0..20 {
+            assert_eq!(dns_rcode(&app, "other.example"), 2);
+            thread::sleep(Duration::from_millis(10));
+        }
         engine.stop().unwrap();
     }
 

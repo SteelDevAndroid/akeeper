@@ -118,8 +118,17 @@ class NativeEngineJniTest {
     }
 
     @Test
+    void pausesAndResumesTheFiltering() {
+        assertThat(engine.pause(60_000)).isTrue();
+        assertThat(engine.pause(0)).as("une durée nulle n'est pas une pause").isFalse();
+        assertThat(engine.resume()).isTrue();
+    }
+
+    @Test
     void ignoresCallsOnceClosed() {
         engine.close();
+        assertThat(engine.pause(1_000)).isFalse();
+        assertThat(engine.resume()).isFalse();
         assertThat(engine.counter(NativeEngine.Counter.PACKETS)).isEqualTo(-1);
         assertThat(engine.setBlockedUids(new int[0])).isFalse();
         engine.close();

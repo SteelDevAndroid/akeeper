@@ -27,4 +27,17 @@ class ShieldStatusTest {
         assertThat(seen).containsExactly(ShieldStatus.Snapshot.STOPPED, running);
         assertThat(ShieldStatus.current().lockdown().revoked()).isTrue();
     }
+
+    @Test
+    void thePauseAndTheStrictDnsFlagSurviveEachOther() {
+        var base = new ShieldStatus.Snapshot(true, new LockdownStatus(true, true));
+
+        var paused = base.withPausedUntil(5_000L).withPrivateDnsStrict(true);
+
+        assertThat(paused.pausedUntil()).isEqualTo(5_000L);
+        assertThat(paused.privateDnsStrict()).isTrue();
+        assertThat(paused.paused()).isTrue();
+        assertThat(paused.withPausedUntil(0).paused()).isFalse();
+        assertThat(base.paused()).isFalse();
+    }
 }
