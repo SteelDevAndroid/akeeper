@@ -44,6 +44,7 @@ public final class ShieldVpnService extends VpnService {
     private ShieldStatus.Subscription prefsChanges;
     private ShieldStatus.Subscription listsChanges;
     private AppPrefs prefs;
+    private ActivityRecorder recorder;
     // Une lecture suivie de l'envoi au moteur ne doit pas s'entrecroiser avec une autre : la dernière gagne.
     private final Object reloadLock = new Object();
     private boolean privateDnsStrict;
@@ -155,6 +156,7 @@ public final class ShieldVpnService extends VpnService {
         if (preferences != null) {
             prefsChanges = preferences.observe(settings -> reloadRules(running, rules, preferences));
         }
+        recorder = new ActivityRecorder(this, engine, preferences);
         // Planifiée ici et non dans l'UI : Always-on VPN démarre le service sans jamais ouvrir l'app.
         RuleUpdates.schedule(this);
         upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
@@ -276,6 +278,10 @@ public final class ShieldVpnService extends VpnService {
         }
         prefsChanges = null;
         listsChanges = null;
+        if (recorder != null) {
+            recorder.close();
+            recorder = null;
+        }
         if (ruleUpdates != null) {
             ruleUpdates.close();
             ruleUpdates = null;

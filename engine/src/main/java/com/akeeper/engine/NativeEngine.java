@@ -3,6 +3,7 @@ package com.akeeper.engine;
 import android.os.ParcelFileDescriptor;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Moteur natif propriétaire du fd TUN : résolveur DNS local filtrant, NAT UDP protégé, neutralisation
@@ -108,6 +109,19 @@ public final class NativeEngine implements AutoCloseable {
         return handle != 0 && nativePause(handle, 0) == 0;
     }
 
+    /**
+     * Active ou coupe le journal d'activité. Coupé, le moteur ne garde rien et n'interroge plus le propriétaire des
+     * requêtes DNS.
+     */
+    public synchronized boolean setLogging(boolean enabled) {
+        return handle != 0 && nativeSetLogging(handle, enabled ? 1 : 0) == 0;
+    }
+
+    /** Événements accumulés depuis le dernier appel ; vide une fois le moteur arrêté. */
+    public synchronized List<FlowEvent> drainEvents() {
+        return handle == 0 ? List.of() : FlowEvent.parse(nativeDrainEvents(handle));
+    }
+
     /** Renvoie -1 une fois le moteur arrêté. */
     public synchronized long counter(Counter counter) {
         return handle == 0 ? -1 : nativeCounter(handle, counter.ordinal());
@@ -140,6 +154,10 @@ public final class NativeEngine implements AutoCloseable {
     private static native int nativeSetUpstream(long handle, int slot, int fd);
 
     private static native int nativeSetBlockedUids(long handle, int[] uids);
+
+    private static native int nativeSetLogging(long handle, int enabled);
+
+    private static native byte[] nativeDrainEvents(long handle);
 
     private static native long nativeCounter(long handle, int counter);
 

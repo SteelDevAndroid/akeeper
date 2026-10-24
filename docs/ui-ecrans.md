@@ -168,6 +168,7 @@ Cet écran n'est affiché que si `Build.MANUFACTURER` fait partie des OEM du gui
 - Section **Activité récente** : domaines contactés, avec un compteur et le verdict par domaine. Toucher un domaine ouvre A5.
 - Section **Données** : volume sur 24 h et 7 jours.
 - Hors MVP : règles distinctes Wi-Fi / données mobiles.
+- Livré sans la section Données : le moteur ne compte pas les octets par UID.
 
 ### A4 — Activité
 
@@ -176,6 +177,8 @@ Cet écran n'est affiché que si `Build.MANUFACTURER` fait partie des OEM du gui
 - Une recherche par domaine.
 - Pied de liste : « Historique conservé 7 jours sur cet appareil ».
 - Si le journal est désactivé (R1), l'état vide affiche « Journal désactivé » avec le bouton **Activer**.
+
+Livré avec écarts : pas de groupement par heure ni de sélecteur d'app (la fiche A3 filtre par app), et un résumé « bloqués depuis minuit » sous les filtres.
 
 ### A5 — Détail événement (bottom sheet)
 
@@ -232,12 +235,12 @@ Pas de widget au MVP.
 | Écran | Données | Source |
 |---|---|---|
 | A1 | État | `LockdownStatus` (`isAlwaysOn`, `isLockdownEnabled`, révocation), état du service, événements moteur (DNS strict, redémarrage) |
-| A1, A2, A3, A4 | Compteurs, volumes, journal | Room (événements écrits par lots), requêtes paginées et indexées sur `ts` |
+| A1, A2, A3, A4 | Compteurs, volumes, journal | SQLCipher (événements écrits par lots), requêtes limitées et indexées sur `ts` |
 | A2, A3 | Liste des apps, UID partagés | `PackageManager` (`getInstalledApplications`, `getPackagesForUid`) |
 | A2 → moteur | Règle par app | Table UID → verdict, remplacée atomiquement dans le moteur (`preconisation-initialisation.md` §4) |
 | R1 | Protection avancée | `AdvancedProtectionPolicy` |
 | R1 | Version des règles | Version monotone persistée (`rules`) |
-| R2 | Exceptions et règles personnelles | Room, puis rechargement du moteur |
+| R2 | Exceptions et règles personnelles | Fichier de listes, puis rechargement du moteur |
 
 ## 8. Points à valider
 

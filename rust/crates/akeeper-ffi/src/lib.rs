@@ -15,7 +15,7 @@ use std::os::fd::RawFd;
 use akeeper_engine::{
     Blocklist, BundleRules, CategoryMask, Config, Counter, Engine, Filter, Host, SharedHost,
 };
-use jni::objects::{GlobalRef, JClass as JniClass, JIntArray, JObject, JValue};
+use jni::objects::{GlobalRef, JByteArray, JClass as JniClass, JIntArray, JObject, JValue};
 use jni::{JNIEnv, JavaVM};
 
 type JniEnv = c_void;
@@ -196,6 +196,46 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativePause(
         Ok(Ok(())) => 0,
         _ => -1,
     }
+}
+
+/// Active (`enabled` ≠ 0) ou coupe le journal d'activité du moteur.
+///
+/// # Safety
+/// `handle` vient de `nativeStart` et n'a pas encore été passé à `nativeStop` (garanti par le verrou Java).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeSetLogging(
+    _env: *mut JniEnv,
+    _class: *mut JClass,
+    handle: JLong,
+    enabled: JInt,
+) -> JInt {
+    // SAFETY: contrat de la fonction ; lecture seule via &Engine.
+    let Some(engine) = (unsafe { (handle as *const Engine).as_ref() }) else {
+        return -1;
+    };
+    match catch_unwind(AssertUnwindSafe(|| engine.set_logging(enabled != 0))) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Vide le journal : événements encodés bout à bout (format de `akeeper_engine::events::encode`), `null` en cas
+/// d'échec.
+///
+/// # Safety
+/// `handle` vient de `nativeStart` et n'a pas encore été passé à `nativeStop` (garanti par le verrou Java).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeDrainEvents<'local>(
+    env: JNIEnv<'local>,
+    _class: JniClass<'local>,
+    handle: JLong,
+) -> JByteArray<'local> {
+    // SAFETY: contrat de la fonction ; lecture seule via &Engine.
+    let events = unsafe { (handle as *const Engine).as_ref() }
+        .and_then(|engine| catch_unwind(AssertUnwindSafe(|| engine.drain_events())).ok());
+    events
+        .and_then(|bytes| env.byte_array_from_slice(&bytes).ok())
+        .unwrap_or_else(|| JByteArray::from(JObject::null()))
 }
 
 fn owned(fd: JInt) -> Option<OwnedFd> {
@@ -551,6 +591,15 @@ mod tests {
         assert_eq!(pause(0), 0);
         assert_eq!(pause(-5), 0);
         stop(handle);
+    }
+
+    #[test]
+    fn logging_toggle_and_drain_reject_null_handle() {
+        // SAFETY: un handle nul est refusé avant tout accès.
+        let status = unsafe {
+            Java_com_akeeper_engine_NativeEngine_nativeSetLogging(null_mut(), null_mut(), 0, 1)
+        };
+        assert_eq!(status, -1);
     }
 
     #[test]

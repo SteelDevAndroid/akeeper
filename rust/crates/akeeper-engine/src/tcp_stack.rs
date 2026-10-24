@@ -19,7 +19,8 @@ use smoltcp::time::Instant as SmolInstant;
 use smoltcp::wire::{HardwareAddress, IpCidr, IpListenEndpoint};
 use socket2::{Domain, Protocol, Socket, Type};
 
-use crate::filter::Filter;
+use crate::events::{EventKind, EventLog, REASON_APP};
+use crate::filter::{Filter, Reason};
 use crate::stats::{Counter, Stats};
 use crate::{HTTPS_PORT, SharedHost};
 
@@ -98,6 +99,7 @@ struct Flow {
 pub(crate) struct TcpStack {
     host: SharedHost,
     filter: Arc<Filter>,
+    events: Arc<EventLog>,
     iface: Interface,
     device: Queue,
     sockets: SocketSet<'static>,
@@ -108,7 +110,12 @@ pub(crate) struct TcpStack {
 }
 
 impl TcpStack {
-    pub(crate) fn new(host: SharedHost, seed: u64, filter: Arc<Filter>) -> Self {
+    pub(crate) fn new(
+        host: SharedHost,
+        seed: u64,
+        filter: Arc<Filter>,
+        events: Arc<EventLog>,
+    ) -> Self {
         let mut device = Queue::default();
         let mut config = Config::new(HardwareAddress::Ip);
         config.random_seed = seed;
@@ -126,6 +133,7 @@ impl TcpStack {
         Self {
             host,
             filter,
+            events,
             iface,
             device,
             sockets: SocketSet::new(Vec::new()),
@@ -165,6 +173,16 @@ impl TcpStack {
             // HTTPS vers un résolveur DoH connu (liste signée) : RST avant tout appel Binder ou socket amont.
             if segment.dst.port() == HTTPS_PORT && self.filter.blocks_ip(segment.dst.ip()) {
                 stats.add(Counter::IpBlocked, 1);
+                if self.events.enabled() {
+                    let uid = self.host.owner_uid(tcp::PROTO, segment.src, segment.dst);
+                    self.events.record(
+                        EventKind::Ip,
+                        true,
+                        Reason::Evasion.code(),
+                        uid,
+                        &segment.dst.ip().to_string(),
+                    );
+                }
                 self.device.rx.push_back(raw.to_vec());
                 return;
             }
@@ -173,6 +191,13 @@ impl TcpStack {
             if uid.is_some_and(|u| blocked.contains(&u)) {
                 // Sans listener, smoltcp répond RST : l'app privée d'Internet échoue aussitôt.
                 stats.add(Counter::AppBlocked, 1);
+                self.events.record(
+                    EventKind::App,
+                    true,
+                    REASON_APP,
+                    uid,
+                    &segment.dst.ip().to_string(),
+                );
                 self.device.rx.push_back(raw.to_vec());
                 return;
             }
@@ -287,6 +312,7 @@ impl TcpStack {
                 self.sockets.get_mut::<smol::Socket>(flow.handle),
                 &mut self.scratch,
                 &self.filter,
+                &self.events,
                 stats,
             );
         }
@@ -324,6 +350,7 @@ fn pump(
     socket: &mut smol::Socket<'static>,
     scratch: &mut [u8],
     filter: &Filter,
+    events: &EventLog,
     stats: &Stats,
 ) {
     if flow.failed {
@@ -356,7 +383,7 @@ fn pump(
     }
 
     // App → serveur, seulement une fois le SNI jugé ; l'autre sens continue (protocoles où le serveur parle d'abord).
-    let may_forward = flow.inspected || inspect(flow, socket, scratch, filter, stats);
+    let may_forward = flow.inspected || inspect(flow, socket, scratch, filter, events, stats);
     if flow.failed {
         return;
     }
@@ -429,6 +456,7 @@ fn inspect(
     socket: &mut smol::Socket<'static>,
     scratch: &mut [u8],
     filter: &Filter,
+    events: &EventLog,
     stats: &Stats,
 ) -> bool {
     while socket.can_recv() && flow.to_upstream.len() < tls::MAX_RECORD {
@@ -444,8 +472,9 @@ fn inspect(
         }
     }
     match tls::client_hello_sni(&flow.to_upstream) {
-        Ok(Sni::Host(host)) if filter.blocks(&host) => {
+        Ok(Sni::Host(host)) if let Some(reason) = filter.verdict(&host) => {
             stats.add(Counter::SniBlocked, 1);
+            events.record(EventKind::Sni, true, reason.code(), flow.uid, &host);
             flow.failed = true;
             socket.abort();
             false

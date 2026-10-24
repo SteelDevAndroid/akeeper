@@ -85,7 +85,7 @@ Pas encore livrés :
   - la ligne Verrouillage ouvre directement les réglages VPN au lieu de revenir à O4 ;
   - O6 n'a pas d'intent propre à chaque OEM, faute de pouvoir les vérifier sur appareil ;
   - R3, Licences et O6 sont des boîtes de dialogue, pas des écrans, pour rester sans Fragments.
-- **Absents, car sans fonction derrière** : réseau local (R1 : l'option n'existe pas dans le service), journal et durée de conservation (pas de Room), statistiques anonymes, bannière Protection avancée (liée à l'option réseau local), listes par catégorie (R2).
+- **Absents, car sans fonction derrière** : réseau local (R1 : l'option n'existe pas dans le service), statistiques anonymes, bannière Protection avancée (liée à l'option réseau local).
 
 **Pause 15 minutes livrée (A1)** :
 - **Accueil** : l'état vert propose **Pause 15 min**. L'état ambre « En pause — reprise à HH:mm » propose **Reprendre maintenant**. La pause passe après les états dégradés (verrouillage manquant, DNS privé strict) dans l'ordre de priorité, comme dans la table de `docs/ui-ecrans.md`.
@@ -109,14 +109,19 @@ Pas encore livrés :
 - **Contournement DNS** : ligne sans interrupteur, toujours active.
 - **Listes personnelles** : exceptions et domaines bloqués, validés en direct (`DomainRules`), avec « Annuler » après un retrait. Un domaine ajouté d'un côté est retiré de l'autre.
 - **Moteur** : ordre d'évaluation = contournement DNS, exceptions, domaines personnels, catégories actives. Une exception gagne sur tout sauf sur le contournement DNS, comme le demande A5. `nativeStart` et `nativeSetRules` reçoivent un masque de catégories.
-- **Écarts** : pas de niveau « standard / renforcé » pour la publicité (une seule liste existe) ; les exceptions ne peuvent pas être ajoutées depuis le détail d'un événement (A5, chantier suivant).
+- **Écarts** : pas de niveau « standard / renforcé » pour la publicité (une seule liste existe) .
+
+**Journal d'activité livré (A3, A4, A5, R1 Vie privée)** :
+- **Moteur** : `events.rs` garde un tampon borné (4096 événements), regroupe les répétitions identiques à moins de 10 s et ne stocke rien tant que le journal est coupé. Il consigne chaque requête DNS (autorisée ou refusée, avec la raison), les SNI refusés, les adresses DoH refusées et les refus du pare-feu par app. L'UID d'une requête DNS n'est cherché (appel Binder) que si le journal est actif. JNI : `nativeSetLogging`, `nativeDrainEvents` (format binaire décrit dans `events.rs`).
+- **Stockage** : base SQLCipher (`ActivityLog`) dans `noBackupFilesDir`, clé de 32 octets chiffrée par Tink/Keystore (`DatabaseKey`). `ActivityRecorder` vide le moteur chaque seconde dans une transaction et purge selon la durée de conservation (1, 3 ou 7 jours). Une base illisible (clé perdue) est recréée.
+- **Écrans** : onglet Activité (A4 : Bloqués par défaut, Autorisés, Tous ; recherche ; pied de liste), fiche événement (A5 : raison, autoriser ou bloquer le domaine, copier), fiche app (A3, en touchant une ligne de l'écran Apps), et dans les Réglages : interrupteur du journal, durée de conservation, effacement avec confirmation.
+- **Écarts** : pas de Room, mais l'API SQLCipher directe (`SQLiteOpenHelper`, une table, pas de DAO : pas de processeur d'annotations pour une seule table) ; pas de module `:storage`, le journal vit dans `:vpn` à côté de `AppPrefs`. Pas de volumes de données par app (A3 : le moteur ne compte pas les octets par UID), pas de regroupement par heure ni de sélecteur d'app dans A4 (la fiche A3 filtre par app). Le journal est actif par défaut, avec 7 jours de conservation.
+- **Non essayé sur appareil** : l'ouverture de la base SQLCipher et son chiffrement (les tests JVM n'ont pas la bibliothèque native). Les `.so` de SQLCipher sont alignés 16 KB (`scripts/check-16kb.sh`).
 
 Restent pour J5 :
 - **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
 - **Pinning TLS** du serveur de règles.
 - **Bundle initial** dans l'APK.
-- **Choix des catégories** (R2).
-- **Stockage SQLCipher et journaux de flux** (purge à 7 jours).
 
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 

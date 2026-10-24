@@ -118,6 +118,27 @@ class NativeEngineJniTest {
     }
 
     @Test
+    void journalsAppFirewallRefusalsOnlyWhileLoggingIsOn() throws Exception {
+        assertThat(engine.setBlockedUids(new int[]{10_123})).isTrue();
+        app.write(ByteBuffer.wrap(tcpPacket(40_003, upstream.getLocalPort(), 4000, 0, SYN)));
+        readPacket();
+        assertThat(engine.drainEvents()).as("journal coupé par défaut").isEmpty();
+
+        assertThat(engine.setLogging(true)).isTrue();
+        app.write(ByteBuffer.wrap(tcpPacket(40_004, upstream.getLocalPort(), 5000, 0, SYN)));
+        readPacket();
+
+        assertThat(engine.drainEvents()).singleElement().satisfies(event -> {
+            assertThat(event.kind()).isEqualTo(FlowEvent.Kind.APP);
+            assertThat(event.blocked()).isTrue();
+            assertThat(event.reason()).isEqualTo(FlowEvent.Reason.APP_FIREWALL);
+            assertThat(event.uid()).isEqualTo(10_123);
+            assertThat(event.name()).isEqualTo("127.0.0.1");
+        });
+        assertThat(engine.drainEvents()).isEmpty();
+    }
+
+    @Test
     void pausesAndResumesTheFiltering() {
         assertThat(engine.pause(60_000)).isTrue();
         assertThat(engine.pause(0)).as("une durée nulle n'est pas une pause").isFalse();
@@ -131,6 +152,8 @@ class NativeEngineJniTest {
         assertThat(engine.resume()).isFalse();
         assertThat(engine.counter(NativeEngine.Counter.PACKETS)).isEqualTo(-1);
         assertThat(engine.setBlockedUids(new int[0])).isFalse();
+        assertThat(engine.setLogging(true)).isFalse();
+        assertThat(engine.drainEvents()).isEmpty();
         engine.close();
     }
 

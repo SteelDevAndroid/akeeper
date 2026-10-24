@@ -3,6 +3,7 @@
 
 mod blocklist;
 mod dns;
+mod events;
 mod filter;
 mod stats;
 mod tcp_stack;
@@ -11,6 +12,7 @@ mod udp_nat;
 pub use akeeper_proto::bundle::MAX_BUNDLE;
 pub use blocklist::Blocklist;
 pub use dns::MAX_UPSTREAMS;
+pub use events::{Event, EventKind, EventLog};
 pub use filter::{BundleRules, CategoryMask, Filter, Reason, RulesError};
 pub use stats::{Counter, Stats};
 
@@ -30,6 +32,7 @@ use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Registry, Token, Waker};
 
 use dns::{Outcome, Resolver};
+
 use tcp_stack::TcpStack;
 use udp_nat::UdpNat;
 
@@ -80,6 +83,7 @@ pub struct Engine {
     waker: Arc<Waker>,
     stats: Arc<Stats>,
     pause: Arc<AtomicBool>,
+    events: Arc<EventLog>,
     thread: Option<JoinHandle<io::Result<()>>>,
 }
 
@@ -94,6 +98,7 @@ impl Engine {
         let (commands, inbox) = mpsc::channel();
         let stats = Arc::new(Stats::default());
         let pause = Arc::new(AtomicBool::new(false));
+        let events = Arc::new(EventLog::default());
         let mut filter = config.filter;
         filter.share_pause(Arc::clone(&pause));
         let thread = thread::Builder::new()
@@ -101,14 +106,19 @@ impl Engine {
             .spawn({
                 let stats = Arc::clone(&stats);
                 let pause = Arc::clone(&pause);
+                let events = Arc::clone(&events);
                 move || {
                     let filter = Arc::new(filter);
                     let flows = Flows {
                         pause,
                         paused_until: None,
-                        resolver: Resolver::new(Arc::clone(&filter)),
-                        nat: UdpNat::new(Arc::clone(&config.host)),
-                        tcp: TcpStack::new(config.host, random_seed(), filter),
+                        resolver: Resolver::new(
+                            Arc::clone(&filter),
+                            Arc::clone(&config.host),
+                            Arc::clone(&events),
+                        ),
+                        nat: UdpNat::new(Arc::clone(&config.host), Arc::clone(&events)),
+                        tcp: TcpStack::new(config.host, random_seed(), filter, events),
                         blocked: HashSet::new(),
                     };
                     run(poll, File::from(tun), flows, &inbox, &stats)
@@ -120,6 +130,7 @@ impl Engine {
             waker,
             stats,
             pause,
+            events,
             thread: Some(thread),
         })
     }
@@ -157,6 +168,16 @@ impl Engine {
 
     pub fn resume(&self) -> io::Result<()> {
         self.send(Command::SetPause(None))
+    }
+
+    /// Active ou coupe le journal d'activité ; coupé, il se vide et les appels Binder qu'il impose cessent.
+    pub fn set_logging(&self, enabled: bool) {
+        self.events.set_enabled(enabled);
+    }
+
+    /// Événements accumulés depuis le dernier appel, au format de `events::encode`.
+    pub fn drain_events(&self) -> Vec<u8> {
+        events::encode(&self.events.drain())
     }
 
     pub fn stats(&self) -> &Stats {
@@ -574,6 +595,48 @@ mod tests {
             .unwrap();
         assert_eq!(rcode(&reply(&app)), 3);
         assert_eq!(engine.stats().get(Counter::DnsBlocked), 2);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn journals_dns_verdicts_only_while_logging_is_on() {
+        let (app, engine) = start("ads.example.net");
+        app.send(&to_resolver(&dns_query(5, "ads.example.net", 1)))
+            .unwrap();
+        reply(&app);
+        assert!(engine.drain_events().is_empty(), "journal coupé par défaut");
+
+        engine.set_logging(true);
+        for id in [6, 7] {
+            app.send(&to_resolver(&dns_query(id, "ads.example.net", 1)))
+                .unwrap();
+            reply(&app);
+        }
+        app.send(&to_resolver(&dns_query(8, "example.org", 1)))
+            .unwrap();
+        reply(&app);
+
+        let bytes = engine.drain_events();
+        // Deux requêtes bloquées regroupées + une autorisée .
+        let mut names = Vec::new();
+        let mut rest = &bytes[..];
+        while !rest.is_empty() {
+            let count = u32::from_be_bytes(rest[16..20].try_into().unwrap());
+            let len = usize::from(u16::from_be_bytes(rest[20..22].try_into().unwrap()));
+            names.push((
+                String::from_utf8(rest[22..22 + len].to_vec()).unwrap(),
+                rest[9],
+                count,
+            ));
+            rest = &rest[22 + len..];
+        }
+        assert_eq!(
+            names,
+            vec![
+                ("ads.example.net".into(), 1, 2),
+                ("example.org".into(), 0, 1)
+            ]
+        );
         engine.stop().unwrap();
     }
 

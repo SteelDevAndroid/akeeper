@@ -47,7 +47,7 @@ final class AppsScreen implements AutoCloseable {
     AppsScreen(AppCompatActivity activity, View root) {
         this.activity = activity;
         this.root = root;
-        this.adapter = new AppAdapter(activity.getPackageManager(), this::onToggle);
+        this.adapter = new AppAdapter(activity.getPackageManager(), this::onToggle, this::onOpen);
 
         RecyclerView list = root.findViewById(R.id.apps_list);
         list.setLayoutManager(new LinearLayoutManager(activity));
@@ -113,6 +113,12 @@ final class AppsScreen implements AutoCloseable {
         adapter.submit(visible, blocked);
         root.findViewById(R.id.apps_empty).setVisibility(visible.isEmpty() && !apps.isEmpty() || rules == null
                 ? View.VISIBLE : View.GONE);
+    }
+
+    private void onOpen(AppEntry app) {
+        if (rules != null) {
+            AppSheet.show(activity, root, app, apps, !blocked.contains(app.packageName()), this::onToggle, worker);
+        }
     }
 
     private void onToggle(AppEntry app, boolean allowed) {

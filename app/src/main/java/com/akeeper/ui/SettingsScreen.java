@@ -9,16 +9,22 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.akeeper.R;
 import com.akeeper.rules.RuleBundle;
 import com.akeeper.rules.RuleStore;
 import com.akeeper.rules.RuleUpdates;
+import com.akeeper.vpn.ActivityLog;
+import com.akeeper.vpn.AppPrefs;
 import com.akeeper.vpn.ShieldStatus;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
 
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -27,6 +33,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.UnaryOperator;
 
 /**
  * Réglages (R1) avec les écrans R3 et « Licences » en boîtes de dialogue, et le guide batterie (O6) pour les
@@ -76,6 +83,8 @@ final class SettingsScreen implements AutoCloseable {
             row.setOnClickListener(v -> showBatteryGuide(guide));
         });
 
+        bindPrivacy(root.findViewById(R.id.settings_privacy), root);
+
         ViewGroup about = root.findViewById(R.id.settings_about);
         addRow(about, -1, R.string.settings_limits_title, null).setOnClickListener(v -> showLimits());
         addRow(about, -1, R.string.settings_licenses_title, null).setOnClickListener(v -> showLicenses());
@@ -86,6 +95,111 @@ final class SettingsScreen implements AutoCloseable {
         // L'activation d'un bundle arrive sur le thread de WorkManager.
         ruleChanges = rules.observe(this::refreshRules);
         refresh();
+    }
+
+    /** Journal d'activité : interrupteur, durée de conservation et effacement. Le Keystore n'est ouvert que hors UI. */
+    private void bindPrivacy(ViewGroup privacy, View root) {
+        var logRow = activity.getLayoutInflater().inflate(R.layout.item_switch_row, privacy, false);
+        ((TextView) logRow.findViewById(R.id.row_title)).setText(R.string.settings_log_title);
+        ((TextView) logRow.findViewById(R.id.row_subtitle)).setText(R.string.settings_log_subtitle);
+        MaterialSwitch logSwitch = logRow.findViewById(R.id.row_switch);
+        // Inactif tant que les préférences ne sont pas lues (et si le Keystore est indisponible).
+        logSwitch.setEnabled(false);
+        privacy.addView(logRow);
+        var retentionRow = addRow(privacy, -1, R.string.settings_retention_title, "");
+        retentionRow.findViewById(R.id.row_chevron).setVisibility(View.GONE);
+        retentionRow.setEnabled(false);
+        var retentionValue = (TextView) retentionRow.findViewById(R.id.row_subtitle);
+        addRow(privacy, -1, R.string.settings_clear_title, null).setOnClickListener(v -> confirmClear(root));
+
+        try {
+            worker.execute(() -> {
+                AppPrefs loaded;
+                try {
+                    loaded = AppPrefs.get(activity);
+                } catch (GeneralSecurityException | IOException keystoreUnavailable) {
+                    loaded = null;
+                }
+                var prefs = loaded;
+                activity.runOnUiThread(() -> showPrivacy(prefs, logSwitch, retentionRow, retentionValue, root));
+            });
+        } catch (RejectedExecutionException closed) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void showPrivacy(AppPrefs prefs, MaterialSwitch logSwitch, View retentionRow, TextView retentionValue,
+                             View root) {
+        if (prefs == null) {
+            retentionValue.setText(R.string.settings_log_unavailable);
+            return;
+        }
+        logSwitch.setChecked(prefs.settings().logEnabled());
+        logSwitch.setEnabled(true);
+        logSwitch.setOnCheckedChangeListener((button, checked) -> save(prefs, root,
+                settings -> settings.withLogEnabled(checked)));
+        retentionValue.setText(activity.getString(R.string.settings_retention_value, prefs.settings().retentionDays()));
+        retentionRow.setEnabled(true);
+        retentionRow.setOnClickListener(v -> {
+            var choices = AppPrefs.RETENTION_CHOICES;
+            var labels = new String[choices.length];
+            int checked = 0;
+            for (int i = 0; i < choices.length; i++) {
+                labels[i] = activity.getString(R.string.settings_retention_value, choices[i]);
+                if (choices[i] == prefs.settings().retentionDays()) {
+                    checked = i;
+                }
+            }
+            new MaterialAlertDialogBuilder(activity)
+                    .setTitle(R.string.settings_retention_title)
+                    .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                        dialog.dismiss();
+                        retentionValue.setText(labels[which]);
+                        save(prefs, root, settings -> settings.withRetentionDays(choices[which]));
+                    })
+                    .setNegativeButton(R.string.action_cancel, null)
+                    .show();
+        });
+    }
+
+    private void save(AppPrefs prefs, View root, UnaryOperator<AppPrefs.Settings> change) {
+        try {
+            worker.execute(() -> {
+                try {
+                    prefs.update(change);
+                } catch (IOException e) {
+                    activity.runOnUiThread(() ->
+                            Snackbar.make(root, R.string.event_save_failed, Snackbar.LENGTH_SHORT).show());
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            // Écran fermé entre-temps.
+        }
+    }
+
+    private void confirmClear(View root) {
+        new MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.settings_clear_confirm_title)
+                .setMessage(R.string.settings_clear_confirm_body)
+                .setNegativeButton(R.string.action_cancel, null)
+                .setPositiveButton(R.string.settings_clear_action, (d, w) -> {
+                    try {
+                        worker.execute(() -> {
+                            int message;
+                            try {
+                                ActivityLog.get(activity).clear();
+                                message = R.string.settings_clear_done;
+                            } catch (GeneralSecurityException | IOException | RuntimeException unavailable) {
+                                message = R.string.event_save_failed;
+                            }
+                            int shown = message;
+                            activity.runOnUiThread(() -> Snackbar.make(root, shown, Snackbar.LENGTH_SHORT).show());
+                        });
+                    } catch (RejectedExecutionException closed) {
+                        // Écran fermé entre-temps.
+                    }
+                })
+                .show();
     }
 
     /** Met à jour les valeurs qui changent hors de l'écran : verrouillage et règles. */

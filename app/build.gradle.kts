@@ -9,6 +9,8 @@ android {
         applicationId = "com.akeeper"
         versionCode = 1
         versionName = "0.1.0"
+        // Les ABI du moteur Rust (cargo-ndk) : SQLCipher n'embarque pas de .so pour les autres.
+        ndk.abiFilters += listOf("arm64-v8a", "x86_64")
     }
 
     // Robolectric charge les ressources, le manifeste et les thèmes réels : il attrape les plantages d'inflation.

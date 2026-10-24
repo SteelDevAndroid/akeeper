@@ -205,6 +205,7 @@ impl Filter {
             .map(|&(id, _)| Reason::Category(id))
     }
 
+    #[cfg(test)]
     pub(crate) fn blocks(&self, name: &str) -> bool {
         self.verdict(name).is_some()
     }
