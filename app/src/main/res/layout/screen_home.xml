@@ -175,6 +175,21 @@
                         app:indicatorColor="@color/akeeper_turquoise"
                         app:trackColor="?attr/colorSurfaceContainerHigh" />
 
+                    <com.akeeper.ui.SparklineView
+                        android:id="@+id/stats_sparkline"
+                        android:layout_width="match_parent"
+                        android:layout_height="64dp"
+                        android:layout_marginTop="16dp"
+                        android:contentDescription="@string/home_chart_description" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/home_chart_24h"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

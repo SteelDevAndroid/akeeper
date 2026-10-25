@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.format.DateFormat;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Toast;
@@ -76,6 +77,7 @@ public final class MainActivity extends AppCompatActivity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService homeWorker = Executors.newSingleThreadExecutor();
     private boolean homeRecentLoading;
+    private HomeState lastHomeState;
     private final Runnable refreshCounters = new Runnable() {
         @Override
         public void run() {
@@ -224,6 +226,9 @@ public final class MainActivity extends AppCompatActivity {
             closeScreens();
             setContentView(layout);
             View root = findViewById(R.id.root);
+            root.setAlpha(0f);
+            root.setTranslationY(dp(8));
+            root.animate().alpha(1f).translationY(0f).setDuration(180).start();
             applySystemBarInsets(root);
             shownLayout = layout;
             if (layout == R.layout.screen_home || layout == R.layout.screen_apps || layout == R.layout.screen_activity) {
@@ -275,6 +280,7 @@ public final class MainActivity extends AppCompatActivity {
             case HOME -> R.id.nav_home;
         });
         nav.setOnItemSelectedListener(item -> {
+            nav.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
             selectTab(item.getItemId() == R.id.nav_apps ? Tab.APPS
                     : item.getItemId() == R.id.nav_activity ? Tab.ACTIVITY : Tab.HOME);
             return true;
@@ -401,6 +407,15 @@ public final class MainActivity extends AppCompatActivity {
         statusIcon.setImageResource(icon);
         statusIcon.setImageTintList(fgColor);
         statusIcon.setBackgroundTintList(bgColor);
+        if (lastHomeState != state) {
+            statusIcon.setScaleX(0.88f);
+            statusIcon.setScaleY(0.88f);
+            statusIcon.setAlpha(0.5f);
+            statusIcon.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(220).start();
+            statusIcon.performHapticFeedback(state.level == HomeState.Level.DANGER
+                    ? HapticFeedbackConstants.REJECT : HapticFeedbackConstants.CONFIRM);
+            lastHomeState = state;
+        }
         TextView levelView = findViewById(R.id.status_level);
         levelView.setText(level);
         levelView.setTextColor(fgColor);
@@ -495,15 +510,18 @@ public final class MainActivity extends AppCompatActivity {
             return;
         }
         homeRecentLoading = true;
+        findViewById(R.id.recent_container).setAlpha(0.45f);
         try {
             homeWorker.execute(() -> {
                 try {
-                    var events = ActivityLog.get(this).query(new ActivityLog.Query(true, ActivityLog.Query.ANY_UID, 3));
+                    var log = ActivityLog.get(this);
+                    var events = log.query(new ActivityLog.Query(true, ActivityLog.Query.ANY_UID, 3));
+                    var hourly = log.blockedHourly(System.currentTimeMillis(), 24);
                     var text = new EventText(this);
                     events.forEach(event -> text.app(event.uid()));
-                    runOnUiThread(() -> showRecentActivity(events, text));
+                    runOnUiThread(() -> showRecentActivity(events, text, hourly));
                 } catch (Exception unavailable) {
-                    runOnUiThread(() -> showRecentActivity(java.util.List.of(), new EventText(this)));
+                    runOnUiThread(() -> showRecentActivity(java.util.List.of(), new EventText(this), new long[0]));
                 }
             });
         } catch (RejectedExecutionException closed) {
@@ -511,13 +529,15 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showRecentActivity(java.util.List<com.akeeper.engine.FlowEvent> events, EventText text) {
+    private void showRecentActivity(java.util.List<com.akeeper.engine.FlowEvent> events, EventText text, long[] hourly) {
         homeRecentLoading = false;
         if (shownLayout != R.layout.screen_home) {
             return;
         }
+        ((SparklineView) findViewById(R.id.stats_sparkline)).setValues(hourly);
         LinearLayout container = findViewById(R.id.recent_container);
         container.removeAllViews();
+        container.animate().alpha(1f).setDuration(160).start();
         if (events.isEmpty()) {
             var empty = new TextView(this);
             empty.setText(R.string.home_recent_empty);

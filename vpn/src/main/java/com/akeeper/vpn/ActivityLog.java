@@ -153,6 +153,27 @@ public final class ActivityLog {
         }
     }
 
+    /** Série horaire de blocages, du plus ancien au plus récent. */
+    public long[] blockedHourly(long nowMillis, int hours) {
+        int size = Math.max(1, Math.min(hours, 168));
+        long[] buckets = new long[size];
+        long currentHour = nowMillis / HOUR * HOUR;
+        long firstHour = currentHour - (long) (size - 1) * HOUR;
+        try (var cursor = helper.getReadableDatabase().rawQuery(
+                "SELECT (ts / ?) * ?, COALESCE(SUM(count), 0) FROM " + TABLE
+                        + " WHERE blocked = 1 AND ts >= ? GROUP BY (ts / ?) ORDER BY 1",
+                new String[]{Long.toString(HOUR), Long.toString(HOUR), Long.toString(firstHour), Long.toString(HOUR)})) {
+            while (cursor.moveToNext()) {
+                long hour = cursor.getLong(0);
+                int index = (int) ((hour - firstHour) / HOUR);
+                if (index >= 0 && index < buckets.length) {
+                    buckets[index] = cursor.getLong(1);
+                }
+            }
+        }
+        return buckets;
+    }
+
     /** Cumule les volumes dans le seau horaire de {@code nowMillis} : une ligne par (app, heure). */
     public void addTraffic(List<TrafficSample> samples, long nowMillis) {
         if (samples.isEmpty()) {
