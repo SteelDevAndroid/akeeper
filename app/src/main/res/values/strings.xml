@@ -277,4 +277,12 @@
     <string name="activity_empty_body">Les événements apparaîtront ici dès qu’aKeeper autorisera ou bloquera une connexion.</string>
     <string name="apps_empty_title">Aucune application trouvée</string>
     <string name="apps_empty_body">Modifiez la recherche ou les filtres pour afficher davantage d’applications.</string>
+
+    <!-- Redesign P2 -->
+    <string name="home_chart_24h">Blocages sur les dernières 24 h</string>
+    <string name="home_chart_description">Courbe des blocages sur 24 heures</string>
+    <string name="settings_section_appearance">Apparence</string>
+    <string name="settings_dynamic_color_title">Couleurs du système</string>
+    <string name="settings_dynamic_color_subtitle">Utiliser la palette Material You de l’appareil. Désactivé par défaut pour conserver l’identité aKeeper.</string>
+    <string name="settings_dynamic_color_restart">La palette sera appliquée à la prochaine ouverture de l’écran.</string>
 </resources>

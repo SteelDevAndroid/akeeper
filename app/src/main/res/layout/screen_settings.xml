@@ -94,6 +94,15 @@
 
             <TextView
                 style="@style/Widget.AKeeper.SectionTitle"
+                android:text="@string/settings_section_appearance" />
+
+            <LinearLayout
+                android:id="@+id/settings_appearance"
+                style="@style/Widget.AKeeper.SettingsGroup"
+                android:orientation="vertical" />
+
+            <TextView
+                style="@style/Widget.AKeeper.SectionTitle"
                 android:text="@string/settings_section_about" />
 
             <LinearLayout

@@ -12,6 +12,7 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.akeeper.AKeeperApplication;
 import com.akeeper.R;
 import com.akeeper.rules.RuleBundle;
 import com.akeeper.rules.RuleStore;
@@ -86,6 +87,7 @@ final class SettingsScreen implements AutoCloseable {
 
         bindNetwork(root.findViewById(R.id.settings_network), root);
         bindPrivacy(root.findViewById(R.id.settings_privacy), root);
+        bindAppearance(root.findViewById(R.id.settings_appearance), root);
 
         ViewGroup about = root.findViewById(R.id.settings_about);
         addRow(about, -1, R.string.settings_limits_title, null).setOnClickListener(v -> showLimits());
@@ -160,6 +162,22 @@ final class SettingsScreen implements AutoCloseable {
                     .setOnDismissListener(d -> showNetwork(prefs, false, toggle, subtitle, root))
                     .show();
         });
+    }
+
+    private void bindAppearance(ViewGroup appearance, View root) {
+        var row = activity.getLayoutInflater().inflate(R.layout.item_switch_row, appearance, false);
+        ((TextView) row.findViewById(R.id.row_title)).setText(R.string.settings_dynamic_color_title);
+        ((TextView) row.findViewById(R.id.row_subtitle)).setText(R.string.settings_dynamic_color_subtitle);
+        MaterialSwitch toggle = SwitchRow.bind(row);
+        var prefs = activity.getSharedPreferences(AKeeperApplication.UI_PREFS, android.content.Context.MODE_PRIVATE);
+        toggle.setChecked(prefs.getBoolean(AKeeperApplication.PREF_DYNAMIC_COLOR, false));
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            prefs.edit().putBoolean(AKeeperApplication.PREF_DYNAMIC_COLOR, checked).apply();
+            button.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM);
+            Snackbar.make(root, R.string.settings_dynamic_color_restart, Snackbar.LENGTH_SHORT).show();
+            activity.recreate();
+        });
+        appearance.addView(row);
     }
 
     /** Journal d'activité : interrupteur, durée de conservation et effacement. Le Keystore n'est ouvert que hors UI. */
