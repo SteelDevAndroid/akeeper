@@ -51,6 +51,16 @@ final class AppSheet {
             // Sans icône : l'en-tête garde le nom.
         }
         ((TextView) view.findViewById(R.id.sheet_app_label)).setText(app.label());
+        ((TextView) view.findViewById(R.id.sheet_app_profile)).setText(switch (app.compatibilityProfile()) {
+            case FINANCE -> R.string.app_detail_profile_finance;
+            case PAYMENT -> R.string.app_detail_profile_payment;
+            case SYSTEM_CONNECTIVITY -> R.string.app_detail_profile_connectivity;
+            case DEFAULT -> app.system() ? R.string.app_detail_profile_system : R.string.app_detail_profile_standard;
+        });
+        view.findViewById(R.id.sheet_app_sensitive).setVisibility(
+                app.system() || app.compatibilityProfile().requiresBlockWarning() ? View.VISIBLE : View.GONE);
+        ((TextView) view.findViewById(R.id.sheet_app_access_state)).setText(
+                allowed ? R.string.app_detail_access_allowed : R.string.app_detail_access_blocked);
 
         MaterialSwitch toggle = view.findViewById(R.id.sheet_app_toggle);
         toggle.setChecked(allowed);
@@ -84,6 +94,8 @@ final class AppSheet {
                     loaded = List.of();
                 }
                 var shown = loaded;
+                int recentBlocked = loaded.stream().filter(com.akeeper.engine.FlowEvent::blocked)
+                        .mapToInt(com.akeeper.engine.FlowEvent::count).sum();
                 long now = System.currentTimeMillis();
                 String volume = null;
                 try {
@@ -105,6 +117,8 @@ final class AppSheet {
                     if (shownVolume != null) {
                         ((TextView) view.findViewById(R.id.sheet_app_volume)).setText(shownVolume);
                     }
+                    ((TextView) view.findViewById(R.id.sheet_app_blocked)).setText(
+                            activity.getString(R.string.app_detail_trackers, recentBlocked));
                     adapter.submit(shown);
                     view.findViewById(R.id.sheet_app_empty).setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
                     events.setVisibility(shown.isEmpty() ? View.GONE : View.VISIBLE);

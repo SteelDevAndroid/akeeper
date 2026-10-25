@@ -61,7 +61,7 @@
     <string name="apps_scope_all">Toutes</string>
     <string name="apps_scope_blocked">Bloquées</string>
     <string name="apps_scope_system">Système</string>
-    <string name="apps_empty">Aucune app ne correspond.</string>
+    <string name="apps_empty">Aucune application trouvée\nModifiez la recherche ou les filtres pour afficher davantage d’applications.</string>
     <string name="apps_rules_unavailable">Règles par app indisponibles : le stockage sécurisé de l\'appareil ne répond pas.</string>
     <string name="apps_toggle_description">Accès Internet pour %1$s</string>
     <string name="apps_blocked">%1$s n\'a plus accès à Internet</string>
@@ -238,4 +238,43 @@
     <string name="apps_profile_standard">Application protégée</string>
     <string name="apps_state_allowed">Internet autorisé</string>
     <string name="apps_state_blocked">Internet bloqué</string>
+
+    <!-- Redesign P1 -->
+    <string name="protection_center_title">Centre de protection</string>
+    <string name="protection_summary_ok">Toutes les protections essentielles sont actives.</string>
+    <string name="protection_summary_warn">La protection fonctionne, mais un réglage mérite votre attention.</string>
+    <string name="protection_summary_danger">La protection principale est interrompue.</string>
+    <string name="protection_layers">Protections</string>
+    <string name="protection_vpn">Connexion protégée</string>
+    <string name="protection_dns">Filtrage des domaines</string>
+    <string name="protection_lockdown">Verrouillage anti-contournement</string>
+    <string name="protection_firewall">Pare-feu des applications</string>
+    <string name="protection_active">Actif</string>
+    <string name="protection_inactive">Inactif</string>
+    <string name="protection_attention">À corriger</string>
+    <string name="protection_recommended">Recommandé</string>
+    <string name="protection_show_technical">Afficher les détails techniques</string>
+    <string name="protection_hide_technical">Masquer les détails techniques</string>
+    <string name="protection_yes">oui</string>
+    <string name="protection_no">non</string>
+    <string name="protection_technical_value">Service actif : %1$s\nVPN permanent : %2$s\nBlocage sans VPN : %3$s\nDNS privé strict : %4$s\nPause jusqu’à : %5$d</string>
+    <string name="home_protection_details">État de la protection</string>
+
+    <string name="app_detail_profile">Profil de compatibilité</string>
+    <string name="app_detail_profile_standard">Protection standard</string>
+    <string name="app_detail_profile_system">Application système · garde-fous renforcés</string>
+    <string name="app_detail_profile_finance">Finance · garde-fous renforcés</string>
+    <string name="app_detail_profile_payment">Paiement · garde-fous renforcés</string>
+    <string name="app_detail_profile_connectivity">Connectivité Android · garde-fous système</string>
+    <string name="app_detail_protection">Protection aKeeper</string>
+    <string name="app_detail_dns_ok">Filtrage DNS actif</string>
+    <string name="app_detail_trackers">Blocages récents : %1$d</string>
+    <string name="app_detail_access_allowed">Internet autorisé</string>
+    <string name="app_detail_access_blocked">Internet bloqué</string>
+    <string name="app_detail_sensitive_hint">Cette app est sensible. aKeeper affiche une confirmation avant tout blocage pour éviter une rupture d’authentification ou de paiement.</string>
+
+    <string name="activity_empty_title">Aucune activité à afficher</string>
+    <string name="activity_empty_body">Les événements apparaîtront ici dès qu’aKeeper autorisera ou bloquera une connexion.</string>
+    <string name="apps_empty_title">Aucune application trouvée</string>
+    <string name="apps_empty_body">Modifiez la recherche ou les filtres pour afficher davantage d’applications.</string>
 </resources>

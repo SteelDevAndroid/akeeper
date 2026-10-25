@@ -91,6 +91,11 @@ final class EventAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         var event = (FlowEvent) rows.get(position);
         var context = holder.itemView.getContext();
         holder.name.setText(event.name());
+        int dotColor = event.blocked()
+                ? (event.reason() == FlowEvent.Reason.CATEGORY && event.categoryId() == 2
+                    ? R.color.akeeper_state_danger : R.color.akeeper_state_warn)
+                : R.color.akeeper_state_ok;
+        holder.dot.setTextColor(context.getColor(dotColor));
         var time = EventText.time(event.timestampMillis());
         holder.detail.setText(showApp
                 ? context.getString(R.string.activity_row_detail, text.app(event.uid()), text.verdict(event), time)
@@ -100,12 +105,14 @@ final class EventAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     static final class Holder extends RecyclerView.ViewHolder {
+        final TextView dot;
         final TextView name;
         final TextView detail;
         final TextView count;
 
         Holder(View view) {
             super(view);
+            dot = view.findViewById(R.id.event_dot);
             name = view.findViewById(R.id.event_name);
             detail = view.findViewById(R.id.event_detail);
             count = view.findViewById(R.id.event_count);

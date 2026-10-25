@@ -114,6 +114,18 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 
+                    <TextView
+                        android:id="@+id/protection_details"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:gravity="center"
+                        android:paddingHorizontal="12dp"
+                        android:text="@string/home_protection_details"
+                        android:textAppearance="?attr/textAppearanceLabelLarge"
+                        android:textColor="?attr/colorSecondary" />
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/status_action"
                         android:layout_width="match_parent"
