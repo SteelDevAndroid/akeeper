@@ -41,6 +41,8 @@ public final class ShieldVpnService extends VpnService {
     private final Handler main = new Handler(Looper.getMainLooper());
     private NativeEngine engine;
     private UpstreamDns upstream;
+    private NetworkStateMonitor networkStateMonitor;
+    private NetworkState networkState = NetworkState.NONE;
     private ShieldStatus.Subscription appRules;
     private RuleStore.Subscription ruleUpdates;
     private ShieldStatus.Subscription prefsChanges;
@@ -120,7 +122,8 @@ public final class ShieldVpnService extends VpnService {
         loadPrefs();
         // Protection avancée : l'option réseau local est ignorée, quoi que dise la préférence.
         var policy = new AdvancedProtectionPolicy(this).effective(new ShieldPolicy(
-                prefs != null && prefs.settings().lanBypass(), LanRanges.prefixes(), false));
+                prefs != null && prefs.settings().lanBypass() && networkState.allowsLanBypass(),
+                LanRanges.prefixes(), false));
         lanApplied = policy.allowLanBypass();
         var builder = new Builder()
                 .setSession(getString(R.string.vpn_session))
@@ -165,9 +168,13 @@ public final class ShieldVpnService extends VpnService {
         recorder = new ActivityRecorder(this, engine, preferences);
         // Planifiée ici et non dans l'UI : Always-on VPN démarre le service sans jamais ouvrir l'app.
         RuleUpdates.schedule(this);
-        upstream = new UpstreamDns(getSystemService(ConnectivityManager.class), engine, this::protect,
+        var connectivity = getSystemService(ConnectivityManager.class);
+        upstream = new UpstreamDns(connectivity, engine, this::protect,
                 this::followUnderlying, strict -> main.post(() -> onPrivateDnsStrict(strict)));
         upstream.start();
+        networkStateMonitor = new NetworkStateMonitor(connectivity,
+                state -> main.post(() -> onNetworkState(state)));
+        networkStateMonitor.start();
         return true;
     }
 
@@ -182,17 +189,35 @@ public final class ShieldVpnService extends VpnService {
 
     /** Les routes d'un VPN sont fixées à l'établissement : changer l'option réseau local le reconstruit. */
     private void onLanOption(AppPrefs.Settings settings) {
-        boolean wanted = settings.lanBypass() && !new AdvancedProtectionPolicy(this).active();
+        boolean wanted = settings.lanBypass() && networkState.allowsLanBypass()
+                && !new AdvancedProtectionPolicy(this).active();
         if (wanted != lanApplied && engine != null) {
-            shutdown();
-            if (!establish()) {
-                ShieldStatus.publish(ShieldStatus.Snapshot.STOPPED);
-                stopSelf();
-                return;
-            }
-            ShieldStatus.publish(new ShieldStatus.Snapshot(true,
-                    new LockdownStatus(isAlwaysOn(), isLockdownEnabled()), privateDnsStrict, pausedUntil));
+            rebuildForNetworkPolicy();
         }
+    }
+
+    private void onNetworkState(NetworkState state) {
+        if (state.equals(networkState)) {
+            return;
+        }
+        networkState = state;
+        var settings = prefs == null ? AppPrefs.Settings.DEFAULT : prefs.settings();
+        boolean wanted = settings.lanBypass() && state.allowsLanBypass()
+                && !new AdvancedProtectionPolicy(this).active();
+        if (wanted != lanApplied && engine != null) {
+            rebuildForNetworkPolicy();
+        }
+    }
+
+    private void rebuildForNetworkPolicy() {
+        shutdown();
+        if (!establish()) {
+            ShieldStatus.publish(ShieldStatus.Snapshot.STOPPED);
+            stopSelf();
+            return;
+        }
+        ShieldStatus.publish(new ShieldStatus.Snapshot(true,
+                new LockdownStatus(isAlwaysOn(), isLockdownEnabled()), privateDnsStrict, pausedUntil));
     }
 
     private void applyAppRules() {
@@ -319,6 +344,10 @@ public final class ShieldVpnService extends VpnService {
         if (appRules != null) {
             appRules.close();
             appRules = null;
+        }
+        if (networkStateMonitor != null) {
+            networkStateMonitor.close();
+            networkStateMonitor = null;
         }
         if (upstream != null) {
             upstream.close();

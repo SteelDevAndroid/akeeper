@@ -29,6 +29,7 @@ public final class BundleVerifier {
     private static final int SECTION_HEADER = 8;
     private static final int KIND_DOMAINS = 1;
     private static final int KIND_NOTICE = 3;
+    private static final int KIND_PROVENANCE = 4;
     private static final int CATEGORY_DOH = 4;
 
     // Indexé par key_id : la rotation ajoute la clé suivante sans retirer celle qui signe encore.
@@ -84,6 +85,37 @@ public final class BundleVerifier {
                 .filter(section -> section.kind() == KIND_NOTICE)
                 .findFirst()
                 .map(section -> new String(checkedBundle, section.offset(), section.length(), StandardCharsets.UTF_8));
+    }
+
+    /** Métadonnées de provenance signées du bundle, une ligne tabulée par source. */
+    public static List<RuleProvenance> provenance(byte[] checkedBundle) {
+        return sections(checkedBundle).stream()
+                .filter(section -> section.kind() == KIND_PROVENANCE)
+                .flatMap(section -> new String(checkedBundle, section.offset(), section.length(), StandardCharsets.UTF_8)
+                        .lines())
+                .map(BundleVerifier::parseProvenance)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    private static Optional<RuleProvenance> parseProvenance(String line) {
+        var fields = line.split("\\t", -1);
+        if (fields.length != 7) {
+            return Optional.empty();
+        }
+        try {
+            int category = Integer.parseInt(fields[0]);
+            long retrievedAt = Long.parseLong(fields[4]);
+            long expiresAt = Long.parseLong(fields[5]);
+            if (category < 0 || category > 255 || retrievedAt < 0 || expiresAt < 0
+                    || fields[6].length() != 64 || !fields[6].matches("[0-9a-fA-F]{64}")) {
+                return Optional.empty();
+            }
+            return Optional.of(new RuleProvenance(category, fields[1], fields[2], fields[3],
+                    retrievedAt, expiresAt, fields[6].toLowerCase()));
+        } catch (NumberFormatException invalid) {
+            return Optional.empty();
+        }
     }
 
     /** Catégories de domaines que contient un bundle déjà contrôlé, hors DoH, qui n'a pas d'interrupteur. */

@@ -5,6 +5,8 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 
+import com.akeeper.vpn.CompatibilityProfile;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +33,8 @@ final class AppCatalog {
         Function<PackageInfo, AppEntry> toEntry = info -> {
             var app = info.applicationInfo;
             return new AppEntry(info.packageName, packageManager.getApplicationLabel(app).toString(), app.uid,
-                    (app.flags & ApplicationInfo.FLAG_SYSTEM) != 0, (int) (perUid.get(app.uid) - 1));
+                    (app.flags & ApplicationInfo.FLAG_SYSTEM) != 0, (int) (perUid.get(app.uid) - 1),
+                    CompatibilityProfile.classify(info.packageName));
         };
         return networked.stream().map(toEntry).toList();
     }

@@ -69,6 +69,9 @@
     <string name="apps_save_failed">Enregistrement impossible, la règle n\'a pas changé.</string>
     <string name="apps_system_confirm_title">Bloquer %1$s ?</string>
     <string name="apps_system_confirm_body">C\'est une app système. Certaines fonctions du téléphone peuvent cesser de marcher.</string>
+    <string name="apps_compat_finance_confirm_body">Cette app est classée Finance par Android. La bloquer peut interrompre l\'authentification bancaire, les notifications de sécurité ou la validation d\'opérations.</string>
+    <string name="apps_compat_payment_confirm_body">Cette app est reconnue comme service de paiement. La bloquer peut empêcher les paiements, la tokenisation ou la validation d\'une carte.</string>
+    <string name="apps_compat_connectivity_confirm_body">Cette app participe à la connectivité Android. La bloquer peut empêcher la détection de portail captif, les services Google ou l\'accès au Play Store.</string>
     <string name="apps_system_confirm_action">Bloquer</string>
     <plurals name="apps_shared">
         <item quantity="one">Accès réseau partagé avec %d autre app</item>

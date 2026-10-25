@@ -49,6 +49,18 @@ class BundleVerifierTest {
     }
 
     @Test
+    void readsSignedProvenanceMetadata() throws GeneralSecurityException {
+        var bytes = TestBundles.signedWithProvenance(first, 0, 6, 100);
+        verifier.verify(bytes);
+
+        assertThat(BundleVerifier.provenance(bytes)).containsExactly(
+                new RuleProvenance(1, "HaGeZi", "GPL-3.0", "https://example.test/list", 100, 200,
+                        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+        assertThat(BundleVerifier.provenance(bytes).getFirst().freshAt(150)).isTrue();
+        assertThat(BundleVerifier.provenance(bytes).getFirst().freshAt(201)).isFalse();
+    }
+
+    @Test
     void listsTheDomainCategoriesOfTheSharedFixtureWithoutTheDohOne() throws IOException {
         try (var in = getClass().getResourceAsStream("fixture-v5.akrb")) {
             // Le fixture porte publicité (1), hameçonnage (3) et DoH (4) ; R2 ne propose pas le DoH.
