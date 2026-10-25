@@ -28,6 +28,7 @@ import com.akeeper.R;
 import com.akeeper.engine.NativeEngine;
 import com.akeeper.ui.OnboardingFlow.Facts;
 import com.akeeper.ui.OnboardingFlow.Step;
+import com.akeeper.vpn.ActivityLog;
 import com.akeeper.vpn.ShieldStatus;
 import com.akeeper.vpn.ShieldVpnService;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
@@ -39,6 +40,9 @@ import java.io.File;
 import java.io.IOException;
 import java.text.NumberFormat;
 import java.util.Date;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /** Activité unique : onboarding (O1 à O4), onglets Accueil (A1) et Apps (A2), puis Réglages (R1). Thread principal uniquement. */
 public final class MainActivity extends AppCompatActivity {
@@ -70,6 +74,8 @@ public final class MainActivity extends AppCompatActivity {
                 render();
             });
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService homeWorker = Executors.newSingleThreadExecutor();
+    private boolean homeRecentLoading;
     private final Runnable refreshCounters = new Runnable() {
         @Override
         public void run() {
@@ -166,6 +172,12 @@ public final class MainActivity extends AppCompatActivity {
         super.onStop();
     }
 
+    @Override
+    protected void onDestroy() {
+        homeWorker.shutdownNow();
+        super.onDestroy();
+    }
+
     private void showPendingCrash() {
         if (crashDialogShown) {
             return;
@@ -217,6 +229,9 @@ public final class MainActivity extends AppCompatActivity {
             if (layout == R.layout.screen_home || layout == R.layout.screen_apps || layout == R.layout.screen_activity) {
                 bindBottomNav();
                 findViewById(R.id.settings_button).setOnClickListener(v -> setSettingsOpen(true));
+            }
+            if (layout == R.layout.screen_home) {
+                findViewById(R.id.recent_all).setOnClickListener(v -> selectTab(Tab.ACTIVITY));
             }
             if (layout == R.layout.screen_apps) {
                 appsScreen = new AppsScreen(this, root);
@@ -453,6 +468,7 @@ public final class MainActivity extends AppCompatActivity {
         findViewById(R.id.notifications_card).setVisibility(notificationsGranted() ? View.GONE : View.VISIBLE);
         findViewById(R.id.notifications_action).setOnClickListener(v -> requestNotificationsFromHome());
         renderCounters();
+        renderRecentActivity();
     }
 
     private void renderCounters() {
@@ -462,9 +478,63 @@ public final class MainActivity extends AppCompatActivity {
         var blocked = ShieldStatus.counter(NativeEngine.Counter.DNS_BLOCKED);
         var queries = ShieldStatus.counter(NativeEngine.Counter.DNS_QUERIES);
         findViewById(R.id.stats_card).setVisibility(queries.isPresent() ? View.VISIBLE : View.GONE);
+        long blockedValue = blocked.orElse(0);
+        long queryValue = queries.orElse(0);
+        int ratio = queryValue <= 0 ? 0 : (int) Math.min(100, Math.round(blockedValue * 100.0 / queryValue));
         var format = NumberFormat.getIntegerInstance();
-        ((TextView) findViewById(R.id.stats_blocked)).setText(format.format(blocked.orElse(0)));
-        ((TextView) findViewById(R.id.stats_queries)).setText(format.format(queries.orElse(0)));
+        ((TextView) findViewById(R.id.stats_blocked)).setText(format.format(blockedValue));
+        ((TextView) findViewById(R.id.stats_queries)).setText(format.format(queryValue));
+        ((TextView) findViewById(R.id.stats_ratio)).setText(getString(R.string.home_blocked_ratio, ratio));
+        ((LinearProgressIndicator) findViewById(R.id.stats_progress)).setProgressCompat(ratio, true);
+    }
+
+    private void renderRecentActivity() {
+        if (shownLayout != R.layout.screen_home || homeRecentLoading) {
+            return;
+        }
+        homeRecentLoading = true;
+        try {
+            homeWorker.execute(() -> {
+                try {
+                    var events = ActivityLog.get(this).query(new ActivityLog.Query(true, ActivityLog.Query.ANY_UID, 3));
+                    var text = new EventText(this);
+                    events.forEach(event -> text.app(event.uid()));
+                    runOnUiThread(() -> showRecentActivity(events, text));
+                } catch (Exception unavailable) {
+                    runOnUiThread(() -> showRecentActivity(java.util.List.of(), new EventText(this)));
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            homeRecentLoading = false;
+        }
+    }
+
+    private void showRecentActivity(java.util.List<com.akeeper.engine.FlowEvent> events, EventText text) {
+        homeRecentLoading = false;
+        if (shownLayout != R.layout.screen_home) {
+            return;
+        }
+        LinearLayout container = findViewById(R.id.recent_container);
+        container.removeAllViews();
+        if (events.isEmpty()) {
+            var empty = new TextView(this);
+            empty.setText(R.string.home_recent_empty);
+            empty.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium);
+            empty.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+            empty.setGravity(android.view.Gravity.CENTER);
+            empty.setPadding(dp(20), dp(22), dp(20), dp(22));
+            container.addView(empty);
+            return;
+        }
+        for (var event : events) {
+            View row = getLayoutInflater().inflate(R.layout.item_home_event, container, false);
+            ((TextView) row.findViewById(R.id.home_event_title)).setText(event.name());
+            ((TextView) row.findViewById(R.id.home_event_detail)).setText(
+                    getString(R.string.home_event_detail, text.app(event.uid()), EventText.time(event.timestampMillis())));
+            row.setContentDescription(event.name() + ", " + text.reason(event));
+            row.setOnClickListener(v -> selectTab(Tab.ACTIVITY));
+            container.addView(row);
+        }
     }
 
     private void requestVpnConsent() {

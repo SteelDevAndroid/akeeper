@@ -56,15 +56,22 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         var app = apps.get(position);
         var context = holder.itemView.getContext();
         holder.label.setText(app.label());
-        holder.detail.setText(app.shared()
+        holder.category.setText(app.shared()
                 ? context.getResources().getQuantityString(R.plurals.apps_shared, app.sharedWith(), app.sharedWith())
-                : app.packageName());
+                : switch (app.compatibilityProfile()) {
+                    case FINANCE -> context.getString(R.string.apps_profile_finance);
+                    case PAYMENT -> context.getString(R.string.apps_profile_payment);
+                    case SYSTEM_CONNECTIVITY -> context.getString(R.string.apps_profile_connectivity);
+                    case DEFAULT -> app.system() ? context.getString(R.string.apps_profile_system)
+                            : context.getString(R.string.apps_profile_standard);
+                });
         try {
             holder.icon.setImageDrawable(packageManager.getApplicationIcon(app.packageName()));
         } catch (PackageManager.NameNotFoundException uninstalled) {
             holder.icon.setImageDrawable(null);
         }
         boolean allowed = !blocked.contains(app.packageName());
+        holder.state.setText(allowed ? R.string.apps_state_allowed : R.string.apps_state_blocked);
         holder.toggle.setOnCheckedChangeListener(null);
         holder.toggle.setChecked(allowed);
         holder.toggle.setContentDescription(context.getString(R.string.apps_toggle_description, app.label()));
@@ -75,14 +82,16 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     static final class Holder extends RecyclerView.ViewHolder {
         final ImageView icon;
         final TextView label;
-        final TextView detail;
+        final TextView category;
+        final TextView state;
         final MaterialSwitch toggle;
 
         Holder(View view) {
             super(view);
             icon = view.findViewById(R.id.app_icon);
             label = view.findViewById(R.id.app_label);
-            detail = view.findViewById(R.id.app_detail);
+            category = view.findViewById(R.id.app_category);
+            state = view.findViewById(R.id.app_state);
             toggle = view.findViewById(R.id.app_toggle);
         }
     }

@@ -220,4 +220,22 @@
     <string name="settings_clear_action">Effacer</string>
     <string name="settings_clear_done">Journal effacé</string>
     <string name="settings_log_unavailable">Réglage indisponible sur cet appareil</string>
+
+    <!-- Redesign P0 -->
+    <string name="home_device_protection">Protection de cet appareil</string>
+    <string name="home_today">Aujourd’hui</string>
+    <string name="home_connections_checked">connexions vérifiées</string>
+    <string name="home_items_blocked">éléments bloqués</string>
+    <string name="home_blocked_ratio">%1$d %% bloquées</string>
+    <string name="home_recent_activity">Activité récente</string>
+    <string name="home_see_all">Voir tout</string>
+    <string name="home_recent_empty">Aucun blocage récent. aKeeper continue de surveiller le trafic.</string>
+    <string name="home_event_detail">%1$s · %2$s</string>
+    <string name="apps_profile_finance">Finance · profil sensible</string>
+    <string name="apps_profile_payment">Paiement · profil sensible</string>
+    <string name="apps_profile_connectivity">Connectivité Android · système</string>
+    <string name="apps_profile_system">Application système</string>
+    <string name="apps_profile_standard">Application protégée</string>
+    <string name="apps_state_allowed">Internet autorisé</string>
+    <string name="apps_state_blocked">Internet bloqué</string>
 </resources>
