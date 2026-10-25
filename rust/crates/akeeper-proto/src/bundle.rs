@@ -28,6 +28,8 @@ pub mod kind {
     pub const CIDRS: u8 = 2;
     /// Texte UTF-8 : sources et licences, affiché par l'écran « Licences ».
     pub const NOTICE: u8 = 3;
+    /// Provenance machine-readable des sources : catégorie, source, licence, URL, dates et SHA-256.
+    pub const PROVENANCE: u8 = 4;
 }
 
 pub mod category {

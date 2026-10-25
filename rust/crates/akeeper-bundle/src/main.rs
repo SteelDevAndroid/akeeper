@@ -17,7 +17,7 @@ usage :
   akeeper-bundle pubkey <seed>        affiche la clé publique d'une graine
   akeeper-bundle build --seed <f> --key-id <0|1> --version <n> --out <f>
         [--created <s unix>] [--ads <f>] [--malware <f>] [--phishing <f>]
-        [--doh <f>] [--doh-ips <f>] [--allow <f>] [--notice <f>]
+        [--doh <f>] [--doh-ips <f>] [--allow <f>] [--notice <f>] [--provenance <f>]
   akeeper-bundle build-unsigned --out <f> [--created <s unix>] [mêmes listes]   liste intégrée à l'APK (version 0)
   akeeper-bundle verify <bundle> <clé 0 hex> [<clé 1 hex>]
   akeeper-bundle urlhaus --csv <f> --tranco <f> --top <n> --out <f>   hôtes d'URLhaus hors IP et domaines populaires";
@@ -126,6 +126,7 @@ fn build_command(args: &[String], signed: bool) -> Result<(), String> {
             "--doh-ips" => sources.doh_ips = Some(text()?),
             "--allow" => sources.allow = Some(text()?),
             "--notice" => sources.notice = Some(text()?),
+            "--provenance" => sources.provenance = Some(text()?),
             _ => return Err(USAGE.into()),
         }
     }

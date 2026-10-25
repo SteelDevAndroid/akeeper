@@ -125,10 +125,16 @@ final class AppsScreen implements AutoCloseable {
         // UID partagé : le moteur bloque par UID, les apps du groupe sont donc basculées ensemble.
         var group = apps.stream().filter(a -> a.uid() == app.uid()).map(AppEntry::packageName)
                 .collect(Collectors.toUnmodifiableSet());
-        if (!allowed && app.system()) {
+        if (!allowed && (app.system() || app.compatibilityProfile().requiresBlockWarning())) {
+            int message = switch (app.compatibilityProfile()) {
+                case FINANCE -> R.string.apps_compat_finance_confirm_body;
+                case PAYMENT -> R.string.apps_compat_payment_confirm_body;
+                case SYSTEM_CONNECTIVITY -> R.string.apps_compat_connectivity_confirm_body;
+                default -> R.string.apps_system_confirm_body;
+            };
             new MaterialAlertDialogBuilder(activity)
                     .setTitle(activity.getString(R.string.apps_system_confirm_title, app.label()))
-                    .setMessage(R.string.apps_system_confirm_body)
+                    .setMessage(message)
                     .setNegativeButton(R.string.action_cancel, (dialog, which) -> refresh())
                     .setPositiveButton(R.string.apps_system_confirm_action, (dialog, which) -> apply(app, group, false))
                     .setOnCancelListener(dialog -> refresh())

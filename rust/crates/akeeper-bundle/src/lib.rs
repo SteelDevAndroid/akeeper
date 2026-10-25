@@ -36,6 +36,7 @@ pub struct Sources {
     /// Exclusions : noms jamais bloqués par les catégories.
     pub allow: Option<String>,
     pub notice: Option<String>,
+    pub provenance: Option<String>,
 }
 
 pub fn signing_key(seed: &[u8; SEED_LEN]) -> SigningKey {
@@ -101,6 +102,13 @@ fn message(key_id: u8, version: u64, created_at: u64, sources: &Sources) -> Resu
             kind: kind::NOTICE,
             category: 0,
             data: notice.as_bytes(),
+        });
+    }
+    if let Some(provenance) = &sources.provenance {
+        sections.push(Section {
+            kind: kind::PROVENANCE,
+            category: 0,
+            data: provenance.as_bytes(),
         });
     }
     Ok(bundle::signed_message(

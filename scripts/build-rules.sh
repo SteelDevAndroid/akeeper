@@ -80,6 +80,27 @@ fi
     echo "Construit le $(date -u +%F) à $(date -u +%H:%M) UTC, version $version."
 } > "$tmp/notice.txt"
 
+retrieved_at="$(date -u +%s)"
+sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+{
+    printf '1\tHaGeZi Multi LIGHT\tGPL-3.0\thttps://github.com/hagezi/dns-blocklists\t%s\t%s\t%s\n' \
+        "$retrieved_at" "$((retrieved_at + 28800))" "$(sha256_file "$lists/light.txt")"
+    printf '3\tPhishing Army\tSee upstream terms\thttps://phishing.army/\t%s\t%s\t%s\n' \
+        "$retrieved_at" "$((retrieved_at + 14400))" "$(sha256_file "$lists/phishing.txt")"
+    [ "$malware" = yes ] && printf '2\tURLhaus\tabuse.ch agreement\thttps://urlhaus.abuse.ch/\t%s\t%s\t%s\n' \
+        "$retrieved_at" "$((retrieved_at + 43200))" "$(sha256_file "$tmp/malware.txt")"
+    printf '5\taKeeper default allow\tGPL-3.0\trepository:rules/sources/default-allow.txt\t%s\t0\t%s\n' \
+        "$retrieved_at" "$(sha256_file "$root/rules/sources/default-allow.txt")"
+    printf '4\taKeeper DoH hosts\tGPL-3.0\trepository:rules/sources/doh-hosts.txt\t%s\t0\t%s\n' \
+        "$retrieved_at" "$(sha256_file "$root/rules/sources/doh-hosts.txt")"
+    printf '4\taKeeper DoH IPs\tGPL-3.0\trepository:rules/sources/doh-ips.txt\t%s\t0\t%s\n' \
+        "$retrieved_at" "$(sha256_file "$root/rules/sources/doh-ips.txt")"
+    [ "$allow_extra" = yes ] && printf '5\tExternal allow list\t%s\t%s\t%s\t0\t%s\n' \
+        "${ALLOW_LIST_NOTICE:-unspecified}" "$ALLOW_LIST_URL" "$retrieved_at" \
+        "$(sha256_file "$lists/allow-extra.txt")"
+} > "$tmp/provenance.txt"
+args+=(--provenance "$tmp/provenance.txt")
+
 seed="$tmp/seed"
 printf '%s' "$RULES_SEED_B64" | base64 -d > "$seed"
 

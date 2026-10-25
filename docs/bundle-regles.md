@@ -37,12 +37,19 @@ Chaque section commence par `kind u8, category u8, 0u16, len u32`, suivis de `le
 | 1 `DOMAINS` | FST de domaines en labels inversés, au format de `Blocklist` ; somme de contrôle vérifiée au chargement | filtrage DNS et SNI |
 | 2 `CIDRS` | plages de 17 octets : préfixe sur l'espace IPv6 (l'IPv4 est stockée en `::ffff:a.b.c.d`, préfixe + 96), puis l'adresse | IP des résolveurs DoH : RST sur TCP/443 |
 | 3 `NOTICE` | texte UTF-8 : sources, licences, liens | écran « Licences » (R1) |
+| 4 `PROVENANCE` | métadonnées UTF-8 tabulées sur les sources du bundle | audit de provenance et de fraîcheur |
 
 Catégories : 1 publicité et traqueurs, 2 malware, 3 hameçonnage, 4 DoH, 5 exclusions (liste blanche).
 - Un type ou une catégorie inconnus sont ignorés, ce qui laisse un bundle plus récent fonctionner sur une ancienne app.
 - Les exclusions (`DOMAINS`/5) ne bloquent rien : leurs noms, sous-domaines compris, échappent aux catégories, en plus de ceux compilés dans le moteur (`rules/sources/default-allow.txt`). Elles ne dépendent pas du choix des catégories, et ni la liste personnelle ni le contournement DNS ne sont rouverts.
 - Une liste DoH (`DOMAINS`/4) présente dans le bundle remplace la liste provisoire embarquée dans le moteur.
 - Toutes les catégories sont appliquées pour l'instant ; le choix par catégorie arrive avec l'écran R2.
+
+### Provenance des sources
+
+La section `PROVENANCE` contient une ligne par source ayant contribué au bundle. Les champs sont séparés par des tabulations : identifiant de catégorie, nom de source, licence/conditions, URL ou référence de dépôt, date de récupération Unix, date d'expiration Unix (`0` = donnée versionnée sans expiration) et empreinte SHA-256 du fichier source. Cette section est couverte par la signature Ed25519 comme le reste du payload.
+
+`RuleStore.provenance()` expose ces métadonnées à l'application. Elles permettent de distinguer une liste présente mais périmée d'une source absente, d'afficher une provenance précise dans les diagnostics et de vérifier qu'un bundle publié correspond bien aux fichiers récupérés par le pipeline.
 
 ## Activation dans l'app
 

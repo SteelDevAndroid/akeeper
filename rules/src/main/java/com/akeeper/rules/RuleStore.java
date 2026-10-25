@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.GeneralSecurityException;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -195,6 +196,17 @@ public final class RuleStore {
             return BundleVerifier.notice(readBounded(active.stream()));
         } catch (IOException unreadable) {
             return Optional.empty();
+        }
+    }
+
+    public List<RuleProvenance> provenance() {
+        try (var active = openRules().orElse(null)) {
+            if (active == null) {
+                return List.of();
+            }
+            return BundleVerifier.provenance(readBounded(active.stream()));
+        } catch (IOException unreadable) {
+            return List.of();
         }
     }
 
