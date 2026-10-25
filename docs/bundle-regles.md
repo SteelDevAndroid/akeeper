@@ -83,7 +83,7 @@ cargo run -p akeeper-bundle -- verify bundle.akrb <clé0 hex> <clé1 hex>
 
 ## Pipeline de publication
 
-`scripts/build-rules.sh <dossier>` construit `bundle.akrb`, le signe et le **revérifie avec les clés publiques de l'app** avant de le laisser sortir. `.github/workflows/rules.yml` l'exécute toutes les 6 h et le publie sur GitHub Pages ; le workflow reste inactif tant que la variable `RULES_PUBLIC_KEYS` est vide.
+`scripts/build-rules.sh <dossier>` construit `bundle.akrb`, le signe et le **revérifie avec les clés publiques de l'app** avant de le laisser sortir. `.github/workflows/rules.yml` l'exécute toutes les 6 h et le publie sur GitHub Pages. Un job `preflight` valide désormais explicitement `RULES_SEED_B64`, `RULES_KEY_ID` et `RULES_PUBLIC_KEYS` avant toute construction : configuration absente, clé publique mal formée, identifiant de clé incohérent ou graine qui ne décode pas exactement 32 octets font échouer le workflow au lieu de le laisser silencieusement en état `skipped`.
 
 | Catégorie | Source | Notes |
 |---|---|---|
