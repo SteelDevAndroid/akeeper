@@ -77,6 +77,8 @@ enum Command {
 
 /// Une pause ne dure jamais plus : l'appelant ne peut pas laisser la protection suspendue indéfiniment.
 pub const MAX_PAUSE: Duration = Duration::from_secs(60 * 60);
+/// Borne les règles par UID reçues de Java : évite qu'un tableau JNI hostile épuise la mémoire du moteur.
+pub const MAX_BLOCKED_UIDS: usize = 16_384;
 
 pub struct Engine {
     commands: Sender<Command>,
@@ -148,7 +150,16 @@ impl Engine {
 
     /// Remplace l'ensemble des apps privées d'Internet ; leurs flux ouverts sont coupés aussitôt.
     pub fn set_blocked_uids(&self, uids: impl IntoIterator<Item = u32>) -> io::Result<()> {
-        self.send(Command::SetBlockedUids(uids.into_iter().collect()))
+        let mut bounded = HashSet::new();
+        let mut count = 0usize;
+        for uid in uids {
+            count += 1;
+            if count > MAX_BLOCKED_UIDS {
+                return Err(io::Error::from(ErrorKind::InvalidInput));
+            }
+            bounded.insert(uid);
+        }
+        self.send(Command::SetBlockedUids(bounded))
     }
 
     /// Remplace les règles d'un bloc. Le filtre est construit par l'appelant, hors du thread moteur ; les flux
@@ -1138,6 +1149,17 @@ mod tests {
         assert_eq!(ip::parse(&buf[..n]).unwrap().protocol, ip::PROTO_ICMP);
         assert!(remote.recv_from(&mut buf).is_err());
         assert_eq!(engine.stats().get(Counter::AppBlocked), 2);
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    fn rejects_oversized_uid_policy() {
+        let (_app, engine) = start("");
+        let too_many = (0..=MAX_BLOCKED_UIDS).map(|uid| uid as u32);
+        assert_eq!(
+            engine.set_blocked_uids(too_many).unwrap_err().kind(),
+            ErrorKind::InvalidInput
+        );
         engine.stop().unwrap();
     }
 

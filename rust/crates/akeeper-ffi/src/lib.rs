@@ -13,7 +13,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::os::fd::RawFd;
 
 use akeeper_engine::{
-    Blocklist, BundleRules, CategoryMask, Config, Counter, Engine, Filter, Host, SharedHost,
+    Blocklist, BundleRules, CategoryMask, Config, Counter, Engine, Filter, Host, MAX_BLOCKED_UIDS,
+    SharedHost,
 };
 use jni::objects::{GlobalRef, JByteArray, JClass as JniClass, JIntArray, JObject, JValue};
 use jni::{JNIEnv, JavaVM};
@@ -132,7 +133,13 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeSetBloc
     let Ok(len) = env.get_array_length(&uids) else {
         return -1;
     };
-    let mut values = vec![0; usize::try_from(len).unwrap_or(0)];
+    let Ok(len) = usize::try_from(len) else {
+        return -1;
+    };
+    if len > MAX_BLOCKED_UIDS {
+        return -1;
+    }
+    let mut values = vec![0; len];
     if env.get_int_array_region(&uids, 0, &mut values).is_err() {
         return -1;
     }
@@ -373,9 +380,12 @@ pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeCounter
     let Some(engine) = (unsafe { (handle as *const Engine).as_ref() }) else {
         return -1;
     };
-    Counter::from_index(counter).map_or(-1, |c| {
-        JLong::try_from(engine.stats().get(c)).unwrap_or(JLong::MAX)
-    })
+    catch_unwind(AssertUnwindSafe(|| {
+        Counter::from_index(counter).map_or(-1, |c| {
+            JLong::try_from(engine.stats().get(c)).unwrap_or(JLong::MAX)
+        })
+    }))
+    .unwrap_or(-1)
 }
 
 /// Confie au moteur un socket UDP connecté au DNS amont et protégé ; `fd` = -1 vide le slot.

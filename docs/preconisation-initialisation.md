@@ -10,7 +10,7 @@ Complément à `etude_technique_cybersecurite_android_mobileshield_2026-v2.md`. 
 - Le contrat JNI se limite pour l'instant à `nativeStart(fd)`, `nativeCounter(handle, index)` et `nativeStop(handle)`, sans aucun objet Java. `Host` (`protect`, `ownerUid`, `onEvents`) arrive en J1 avec le résolveur DNS, `reloadRules` en J5.
 - Le moteur compte puis abandonne chaque paquet : rien ne ressort du tunnel tant qu'aucun verdict n'existe.
 - Versions retenues : AGP 9.4.1, Gradle 9.8.1, NDK 30.0.16248370, JUnit 5.14.4, Mockito 5.24.0, AssertJ 3.27.7, Material 1.14.0. Le Kotlin intégré d'AGP 9 est désactivé (modules 100 % Java).
-- L'audit `cargo-deny` n'est pas encore dans la CI : il faut d'abord écrire sa politique (`deny.toml`).
+- La chaîne d'approvisionnement est contrôlée par `.github/workflows/security.yml` : OSV-Scanner PR, `cargo audit`, `cargo deny`, CodeQL Java/Kotlin + Rust, MobSF/APK checks et SBOM CycloneDX. La politique Rust est dans `rust/deny.toml` (voir `docs/security-supply-chain.md`).
 
 **J1 livré (VPN DNS seul)** : moteur (résolveur filtrant), service et onboarding + accueil. Écarts et points ouverts :
 
@@ -100,9 +100,9 @@ Pas encore livrés :
 
 **Pipeline de règles livré** (`scripts/build-rules.sh`, `.github/workflows/rules.yml`, `akeeper-bundle urlhaus`) :
 - Il construit un bundle signé avec les catégories publicité (HaGeZi LIGHT), hameçonnage (Phishing Army), malware (URLhaus, s'il a sa clé) et DoH (fichiers `rules/sources/`), le revérifie avec les clés publiques de l'app, puis le publie sur GitHub Pages toutes les 6 h.
+- Un `preflight` bloque désormais explicitement la publication si `RULES_SEED_B64`, `RULES_KEY_ID` ou `RULES_PUBLIC_KEYS` sont absents ou incohérents ; il contrôle aussi la taille de la graine décodée et le format des clés publiques.
 - L'extraction URLhaus écarte les adresses IP et les hôtes sous un domaine du top 100 000 Tranco.
-- **Non essayé** : le téléchargement réel d'URLhaus, faute de clé, et la publication sur Pages. Le script a été exécuté ici sur de vraies listes HaGeZi et Phishing Army, avec une clé de test.
-- **À faire par le porteur** : clés, secrets, variables, Pages (voir `docs/bundle-regles.md`).
+- **Configuration propriétaire requise** : les secrets/variables GitHub et l'activation Pages ne peuvent pas être livrés dans le dépôt. Ils doivent être définis dans le dépôt cible avant le premier déploiement (voir `docs/bundle-regles.md`).
 
 **R2, listes de blocage livré** :
 - **Catégories** : Publicités et traqueurs, Hameçonnage, Sites malveillants, avec un interrupteur chacune. Une catégorie absente des règles en vigueur est grisée avec « Pas encore disponible » : aujourd'hui la liste intégrée ne porte que la publicité. Les préférences sont chiffrées (`AppPrefs`).
@@ -123,9 +123,9 @@ Pas encore livrés :
 - **Non essayé sur appareil** : l'ouverture de la base SQLCipher et son chiffrement (les tests JVM n'ont pas la bibliothèque native). Les `.so` de SQLCipher sont alignés 16 KB (`scripts/check-16kb.sh`).
 
 Restent pour J5 :
-- **Côté serveur** : le pipeline (téléchargement des sources, construction, signature) et son URL. Sans `akeeper.rulesUrl`, rien n'est planifié.
+- **Déploiement propriétaire du serveur de règles** : renseigner les secrets/variables du dépôt cible, activer GitHub Pages et configurer `akeeper.rulesUrl`. Sans cette URL, rien n'est planifié côté appareil.
 - **Pinning TLS** du serveur de règles.
-- **Bundle initial** dans l'APK.
+- **Validation de production** du bundle signé et de la rotation de clé sur le dépôt cible.
 
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
 

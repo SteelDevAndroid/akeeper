@@ -1,0 +1,157 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "29 3 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: "30.0.16248370"
+
+jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@v2.7.0
+    with:
+      scan-args: |-
+        --lockfile=./rust/Cargo.lock
+      upload-sarif: false
+      fail-on-vuln: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+  rust-supply-chain:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Audit Rust advisories
+        run: cargo install cargo-audit --locked && cargo audit --deny warnings
+      - name: Enforce Rust dependency policy
+        run: cargo install cargo-deny --locked && cargo deny check
+
+  codeql-java-kotlin:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compile Java and Kotlin for CodeQL
+        run: ./gradlew :app:compileDebugJavaWithJavac :vpn:compileDebugJavaWithJavac :rules:compileDebugJavaWithJavac :engine:compileDebugJavaWithJavac
+      - uses: github/codeql-action/analyze@v4
+
+  codeql-rust:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+
+  mobsfscan:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install mobsfscan
+      - name: Scan Android sources
+        run: mobsfscan . --type android --sarif --output mobsfscan.sarif --no-fail
+      - name: Upload SARIF
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: mobsfscan.sarif
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobsfscan-sarif
+          path: mobsfscan.sarif
+          if-no-files-found: error
+
+  android-artifact-security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - run: cargo install cargo-ndk --locked
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Lint and build debug APK
+        run: ./gradlew lint :app:assembleDebug
+      - name: Verify APK signature
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: APKLeaks report
+        run: |
+          pip install apkleaks
+          apkleaks -f app/build/outputs/apk/debug/app-debug.apk -o apkleaks.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-security-reports
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.xml
+            apkleaks.txt
+          if-no-files-found: warn
+
+  sbom:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: akeeper-sbom.cdx.json
+          artifact-name: akeeper-sbom-cyclonedx
+          upload-release-assets: false

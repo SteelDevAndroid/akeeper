@@ -1,7 +1,6 @@
 name: rules
 
-# Construit et publie le bundle de règles signé (docs/bundle-regles.md). Inactif tant que la variable RULES_PUBLIC_KEYS
-# n'est pas définie : une signature ne se fait qu'avec la graine du secret RULES_SEED_B64, jamais avec une clé du dépôt.
+# Construit et publie le bundle signé. Le préflight échoue explicitement si la configuration de signature manque.
 on:
   schedule:
     - cron: "41 */6 * * *"
@@ -15,8 +14,36 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate signing configuration
+        env:
+          RULES_SEED_B64: ${{ secrets.RULES_SEED_B64 }}
+          RULES_KEY_ID: ${{ vars.RULES_KEY_ID }}
+          RULES_PUBLIC_KEYS: ${{ vars.RULES_PUBLIC_KEYS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in RULES_SEED_B64 RULES_KEY_ID RULES_PUBLIC_KEYS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is required to publish signed rules"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+          case "$RULES_KEY_ID" in 0|1) ;; *) echo "::error::RULES_KEY_ID must be 0 or 1"; exit 1;; esac
+          IFS=',' read -r -a keys <<< "$RULES_PUBLIC_KEYS"
+          [ "${#keys[@]}" -ge 1 ] && [ "${#keys[@]}" -le 2 ] || { echo "::error::RULES_PUBLIC_KEYS must contain one or two keys"; exit 1; }
+          for key in "${keys[@]}"; do
+            [[ "$key" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "::error::Each public key must be 32-byte hex"; exit 1; }
+          done
+          [ "$RULES_KEY_ID" -lt "${#keys[@]}" ] || { echo "::error::RULES_KEY_ID has no matching public key"; exit 1; }
+          seed_bytes="$(printf '%s' "$RULES_SEED_B64" | base64 -d 2>/dev/null | wc -c)"
+          [ "$seed_bytes" -eq 32 ] || { echo "::error::RULES_SEED_B64 must decode to exactly 32 bytes"; exit 1; }
+
   publish:
-    if: vars.RULES_PUBLIC_KEYS != ''
+    needs: preflight
     runs-on: ubuntu-24.04
     environment:
       name: github-pages
@@ -26,9 +53,9 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Construire, signer et revérifier le bundle
+      - name: Build, sign and reverify bundle
         env:
           RULES_SEED_B64: ${{ secrets.RULES_SEED_B64 }}
           RULES_KEY_ID: ${{ vars.RULES_KEY_ID }}

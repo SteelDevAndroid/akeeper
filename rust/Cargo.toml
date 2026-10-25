@@ -19,8 +19,8 @@ indexing_slicing = "deny"
 panic = "deny"
 
 [workspace.dependencies]
-akeeper-proto = { path = "crates/akeeper-proto" }
-akeeper-engine = { path = "crates/akeeper-engine" }
+akeeper-proto = { path = "crates/akeeper-proto", version = "0.1.0" }
+akeeper-engine = { path = "crates/akeeper-engine", version = "0.1.0" }
 mio = { version = "1.2", features = ["os-poll", "os-ext", "net"] }
 libc = "0.2"
 fst = "0.4"
