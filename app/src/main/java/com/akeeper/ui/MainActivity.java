@@ -232,6 +232,8 @@ public final class MainActivity extends AppCompatActivity {
             }
             if (layout == R.layout.screen_home) {
                 findViewById(R.id.recent_all).setOnClickListener(v -> selectTab(Tab.ACTIVITY));
+                findViewById(R.id.protection_details).setOnClickListener(v -> ProtectionSheet.show(this));
+                findViewById(R.id.protection_hero).setOnClickListener(v -> ProtectionSheet.show(this));
             }
             if (layout == R.layout.screen_apps) {
                 appsScreen = new AppsScreen(this, root);
