@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aKeeper — Politique de confidentialité</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1b1c1e; --bg: #fdfdfd; --muted: #5d6066; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e6e8; --bg: #141517; --muted: #a2a5ab; } }
+  body { margin: 0 auto; max-width: 44rem; padding: 1.5rem 1rem 3rem; font: 16px/1.6 system-ui, sans-serif;
+         color: var(--fg); background: var(--bg); }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  .muted { color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid var(--muted); padding: .4rem; text-align: left; vertical-align: top; }
+</style>
+</head>
+<body>
+<h1>Politique de confidentialité d'aKeeper</h1>
+<p class="muted">Dernière mise à jour : 26 octobre 2026.</p>
+
+<p>aKeeper est un pare-feu et un filtre DNS pour Android. Il utilise l'interface <code>VpnService</code> d'Android pour
+examiner le trafic de vos apps <strong>sur votre téléphone</strong>. Ce VPN est local : aucun trafic n'est envoyé vers un
+serveur d'aKeeper, et l'éditeur ne reçoit, ne stocke ni ne partage aucune donnée vous concernant.</p>
+
+<h2>Éditeur et contact</h2>
+<p>Éditeur : <span id="publisher">[nom de l'éditeur]</span>. Contact : <span id="contact">[adresse de contact]</span>.</p>
+
+<h2>Données traitées, uniquement sur l'appareil</h2>
+<table>
+  <tr><th>Donnée</th><th>Usage</th><th>Conservation</th></tr>
+  <tr><td>Noms de domaine demandés par vos apps (DNS) et nom de serveur des connexions TLS (SNI)</td>
+      <td>Décider de bloquer ou d'autoriser la connexion ; journal d'activité</td>
+      <td>Journal chiffré sur l'appareil, 1, 3 ou 7 jours selon votre réglage (7 au maximum). Le journal peut être
+          désactivé ou effacé dans les Réglages.</td></tr>
+  <tr><td>App à l'origine de chaque connexion (identifiant Android de l'app)</td>
+      <td>Pare-feu par app, journal d'activité</td><td>Comme le journal</td></tr>
+  <tr><td>Volumes de données envoyés et reçus par app, par heure</td><td>Fiche de chaque app</td><td>Comme le journal</td></tr>
+  <tr><td>Liste des apps installées</td><td>Écran Apps : choisir quelles apps accèdent à Internet</td>
+      <td>Lue à l'affichage, non conservée. Seuls les noms des apps que vous bloquez sont gardés, chiffrés.</td></tr>
+  <tr><td>Vos listes personnelles (domaines bloqués et exceptions) et vos préférences</td><td>Appliquer vos règles</td>
+      <td>Dans l'espace privé de l'app, jusqu'à ce que vous les modifiiez ou désinstalliez l'app</td></tr>
+  <tr><td>Rapport de plantage</td><td>Vous l'afficher au lancement suivant</td>
+      <td>Le dernier seulement, sur l'appareil. Il n'est jamais envoyé : vous seul pouvez le copier.</td></tr>
+</table>
+<p>aKeeper ne déchiffre jamais le contenu de vos connexions : pas de pages, de messages, de mots de passe ni de
+formulaires. Les données de l'app sont exclues des sauvegardes Android et disparaissent à la désinstallation.</p>
+
+<h2>Connexions faites par aKeeper lui-même</h2>
+<ul>
+  <li><strong>Listes de blocage</strong> : toutes les 12 heures, aKeeper télécharge la liste de règles signée publiée sur
+      GitHub Pages (GitHub, Inc.). La requête ne contient aucun identifiant ni aucune donnée vous concernant ; comme pour
+      tout site web, l'hébergeur reçoit votre adresse IP. Voir la
+      <a href="https://docs.github.com/fr/site-policy/privacy-policies/github-general-privacy-statement">déclaration de confidentialité de GitHub</a>.</li>
+  <li><strong>DNS</strong> : les requêtes DNS autorisées sont transmises aux serveurs DNS du réseau auquel vous êtes
+      connecté (box, opérateur), comme elles le seraient sans aKeeper.</li>
+</ul>
+
+<h2>Ce qu'aKeeper ne fait pas</h2>
+<ul>
+  <li>Aucun compte, aucune publicité, aucune mesure d'audience, aucun SDK tiers de collecte.</li>
+  <li>Aucune vente, aucun partage, aucun transfert de données à des tiers.</li>
+  <li>Aucune redirection du trafic de vos apps à des fins commerciales.</li>
+</ul>
+
+<h2>Vos droits</h2>
+<p>L'éditeur ne détient aucune donnée vous concernant : il n'a rien à vous communiquer, rectifier ou effacer. Vous gardez
+la maîtrise des données locales : désactivation et effacement du journal dans les Réglages, ou désinstallation de l'app.
+Pour toute question, écrivez au contact ci-dessus. Vous pouvez aussi saisir la CNIL (<a href="https://www.cnil.fr">cnil.fr</a>).</p>
+
+<h2>Enfants</h2>
+<p>aKeeper ne s'adresse pas spécifiquement aux enfants et ne collecte aucune donnée.</p>
+
+<h2>Modifications</h2>
+<p>Toute modification de cette politique est publiée sur cette page, avec sa date de mise à jour.</p>
+</body>
+</html>

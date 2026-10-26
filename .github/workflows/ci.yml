@@ -65,7 +65,7 @@ jobs:
           RULES_URL: ${{ vars.RULES_URL }}
           MIN_RULE_VERSION: ${{ vars.MIN_RULE_VERSION || '0' }}
         run: >-
-          ./gradlew check :app:assembleRelease :app:assembleDebug
+          ./gradlew check :app:assembleRelease :app:assembleDebug :app:bundleRelease
           "-Pakeeper.rulePublicKeys=$RULE_PUBLIC_KEYS"
           "-Pakeeper.rulesUrl=$RULES_URL"
           "-Pakeeper.minRuleVersion=$MIN_RULE_VERSION"
@@ -78,6 +78,8 @@ jobs:
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release*.apk
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 14
 

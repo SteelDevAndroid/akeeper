@@ -132,6 +132,12 @@ Pas encore livrés :
 - **CI** : l'APK est construit avec les variables `RULES_PUBLIC_KEYS`, `RULES_URL` et `MIN_RULE_VERSION` du dépôt et signé si les secrets `RELEASE_*` existent.
 - **Non essayé sur appareil** : rien de ce qui précède, faute d'émulateur.
 
+**Dossier Play et R8 (J6, partie 2)** :
+- **R8** : code et ressources réduits en release. Les points d'entrée JNI (`NativeEngine`, méthodes natives) et les méthodes de `Host` gardent leur nom, vérifié dans le dex. La CI archive `mapping.txt` et construit l'AAB exigé par Play.
+- **Dossier** : `docs/play/dossier-play.md` contient les textes des formulaires VpnService, `QUERY_ALL_PACKAGES` et service de premier plan, les réponses Data safety et la fiche. La politique de confidentialité, `docs/play/confidentialite.html`, est publiée sur Pages avec le bundle.
+- **O1** : la divulgation cite la liste des apps installées et le téléchargement des listes. Son bouton devient **Accepter et continuer** (consentement explicite exigé par Play).
+- **Risque principal** : `QUERY_ALL_PACKAGES`. Un pare-feu par app n'est pas cité parmi les usages admis ; le repli (`<queries>` LAUNCHER) est décrit dans le dossier.
+
 Restent pour J5 :
 - **Déploiement propriétaire du serveur de règles** : renseigner les secrets/variables du dépôt cible, activer GitHub Pages et configurer `akeeper.rulesUrl`. Sans cette URL, rien n'est planifié côté appareil.
 - **Pinning TLS** du serveur de règles.

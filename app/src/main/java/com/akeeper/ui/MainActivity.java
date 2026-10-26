@@ -331,7 +331,8 @@ public final class MainActivity extends AppCompatActivity {
             addBullet(extra, R.drawable.ic_apps, R.string.disclosure_choose);
             addBullet(extra, R.drawable.ic_phone, R.string.disclosure_local);
         }
-        primary(R.string.action_continue, v -> {
+        // Politique Play (VpnService, données utilisateur) : consentement explicite avant prepare().
+        primary(R.string.action_accept_continue, v -> {
             disclosureAccepted = true;
             render();
         });

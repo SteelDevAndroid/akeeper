@@ -3,14 +3,14 @@
     <string name="app_name" translatable="false">aKeeper</string>
 
     <string name="onboarding_step">Étape %1$d sur %2$d</string>
-    <string name="action_continue">Continuer</string>
     <string name="action_later">Plus tard</string>
 
     <string name="disclosure_title">aKeeper filtre le trafic de vos apps, directement sur votre téléphone</string>
     <string name="disclosure_block">Bloque publicités, traqueurs et sites malveillants.</string>
     <string name="disclosure_choose">Vous choisissez quelles apps accèdent à Internet.</string>
     <string name="disclosure_local">Tout est traité localement : aucun trafic n\'est envoyé à nos serveurs.</string>
-    <string name="disclosure_data">Données traitées : domaines consultés et app à l\'origine de chaque connexion, conservés au plus 7 jours sur l\'appareil. Aucun contenu de page, aucun mot de passe, aucun envoi vers un serveur.</string>
+    <string name="disclosure_data">Données traitées sur l\'appareil : domaines consultés et app à l\'origine de chaque connexion, conservés au plus 7 jours ; liste des apps installées, pour choisir lesquelles accèdent à Internet. Aucun contenu de page, aucun mot de passe, rien n\'est envoyé vers un serveur : seules les listes de blocage sont téléchargées.</string>
+    <string name="action_accept_continue">Accepter et continuer</string>
 
     <string name="consent_title">Autoriser la connexion VPN</string>
     <string name="consent_body">Android va vous demander d\'autoriser une connexion VPN. aKeeper l\'utilise pour filtrer le trafic localement, pas pour le faire passer par un serveur.</string>

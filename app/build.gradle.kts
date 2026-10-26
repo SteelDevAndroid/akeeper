@@ -30,6 +30,13 @@ android {
         )
     }
 
+    // R8 : code et ressources réduits ; les règles JNI viennent de engine/consumer-rules.pro.
+    buildTypes.getByName("release") {
+        isMinifyEnabled = true
+        isShrinkResources = true
+        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
+
     // Clé de release fournie par la CI (secrets) : jamais dans le dépôt. Sans elle, l'APK release reste non signé.
     val keystore = providers.environmentVariable("AKEEPER_KEYSTORE").orNull
     if (keystore != null) {

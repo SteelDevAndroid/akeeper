@@ -628,7 +628,7 @@ class LockdownStatusTest {
 - Formulaire **VpnService** (catégorie *device security / firewall*), aucun serveur distant, divulgation in-app avant `prepare()`.
 - Déclaration FGS `systemExempted` dans la Play Console.
 - targetSdk 36 (exigence Play en vigueur), `.so` alignées 16 KB.
-- **Data Safety** : historique de navigation déclaré dès qu'un journal de domaines existe, même local.
+- **Data Safety** : aucune collecte déclarée tant que rien ne quitte l'appareil. Pour Play, un traitement uniquement local n'est pas une collecte ; le journal de domaines reste local. Toute télémétrie ou tout envoi impose de revoir le formulaire avant publication (`docs/play/dossier-play.md`).
 - **RGPD** : traitement local par défaut ; télémétrie opt-in, agrégée, inscrite au registre.
 
 ## 10. Limites assumées (affichées dans l'app)
