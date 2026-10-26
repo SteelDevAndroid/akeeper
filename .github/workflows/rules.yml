@@ -64,6 +64,8 @@ jobs:
           ALLOW_LIST_URL: ${{ vars.ALLOW_LIST_URL }}
           ALLOW_LIST_NOTICE: ${{ vars.ALLOW_LIST_NOTICE }}
         run: scripts/build-rules.sh site
+      # Politique de confidentialité exigée par la fiche Play : publiée à côté du bundle.
+      - run: cp docs/play/confidentialite.html site/confidentialite.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

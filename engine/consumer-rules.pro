@@ -4,3 +4,7 @@
     boolean protect(int);
     int ownerUid(int, byte[], int, byte[], int);
 }
+# Points d'entrée JNI liés par nom (Java_com_akeeper_engine_NativeEngine_*) : classe et méthodes natives intactes.
+-keepclasseswithmembernames,includedescriptorclasses class com.akeeper.engine.NativeEngine {
+    native <methods>;
+}
