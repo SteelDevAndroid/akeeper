@@ -200,6 +200,13 @@ impl Engine {
         &self.stats
     }
 
+    /// Faux dès que la boucle est sortie (TUN fermé, erreur d'epoll) : le tunnel ne relaie alors plus rien.
+    pub fn is_running(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
+    }
+
     /// Bloque jusqu'à l'arrêt de la boucle ; le TUN et les sockets amont sont fermés à la sortie du thread.
     pub fn stop(mut self) -> io::Result<()> {
         self.shutdown()
@@ -1456,9 +1463,10 @@ mod tests {
         // Un pipe signale la fermeture par une lecture de 0 octet, comme le TUN révoqué.
         let (reader, writer) = std::io::pipe().unwrap();
         let engine = Engine::start(OwnedFd::from(reader), config("", true)).unwrap();
+        assert!(engine.is_running());
         drop(writer);
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !engine.thread.as_ref().unwrap().is_finished() {
+        while engine.is_running() {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(5));
         }

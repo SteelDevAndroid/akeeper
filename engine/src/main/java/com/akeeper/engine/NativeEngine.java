@@ -127,6 +127,14 @@ public final class NativeEngine implements AutoCloseable {
         return handle == 0 ? List.of() : TrafficSample.parse(nativeDrainTraffic(handle));
     }
 
+    /**
+     * Faux dès que la boucle native est sortie (TUN fermé, erreur d'epoll) : le tunnel reste établi mais ne relaie
+     * plus rien, et le service doit le reconstruire.
+     */
+    public synchronized boolean isRunning() {
+        return handle != 0 && nativeIsRunning(handle) == 1;
+    }
+
     /** Renvoie -1 une fois le moteur arrêté. */
     public synchronized long counter(Counter counter) {
         return handle == 0 ? -1 : nativeCounter(handle, counter.ordinal());
@@ -165,6 +173,8 @@ public final class NativeEngine implements AutoCloseable {
     private static native byte[] nativeDrainEvents(long handle);
 
     private static native byte[] nativeDrainTraffic(long handle);
+
+    private static native int nativeIsRunning(long handle);
 
     private static native long nativeCounter(long handle, int counter);
 

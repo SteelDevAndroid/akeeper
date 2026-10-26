@@ -114,7 +114,7 @@ cargo run -p akeeper-bundle -- verify bundle.akrb <clé0 hex> <clé1 hex>
    - variables facultatives `ALLOW_LIST_URL` (liste blanche supplémentaire, un domaine par ligne) et `ALLOW_LIST_NOTICE` (source et licence affichées dans Licences) ;
    - variable `RULES_KEY_ID` : `0` ou `1`, la position de la clé qui signe.
 3. Settings › Pages › Source : **GitHub Actions**, puis lancer le workflow `rules` à la main une première fois.
-4. Dans `gradle.properties`, renseigner **les mêmes clés** (`akeeper.rulePublicKeys`) et `akeeper.rulesUrl=https://<compte>.github.io/<dépôt>/bundle.akrb`. Sans les clés, l'app n'accepte aucun bundle ; avec d'autres clés, elle les refuse tous.
+4. Variable de dépôt `RULES_URL=https://<compte>.github.io/<dépôt>/bundle.akrb` (et `MIN_RULE_VERSION`, relevée à chaque release) : la CI les passe à Gradle avec `RULES_PUBLIC_KEYS`, donc **les mêmes clés** que le pipeline. Un build local les reçoit par `gradle.properties` (`akeeper.rulePublicKeys`, `akeeper.rulesUrl`, `akeeper.minRuleVersion`). Sans les clés, l'app n'accepte aucun bundle ; avec d'autres clés, elle les refuse tous.
 5. Archiver l'accord d'abuse.ch avant d'activer la catégorie malware.
 
 ## Pas encore fait

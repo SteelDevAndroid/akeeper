@@ -1,7 +1,9 @@
 package com.akeeper.vpn;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -13,12 +15,11 @@ import android.os.ParcelFileDescriptor;
 import com.akeeper.engine.NativeEngine;
 import com.akeeper.rules.RuleStore;
 import com.akeeper.rules.RuleUpdates;
+import com.akeeper.security.AdvancedProtectionPolicy;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import com.akeeper.security.AdvancedProtectionPolicy;
-
 import java.security.GeneralSecurityException;
 
 /**
@@ -34,8 +35,10 @@ public final class ShieldVpnService extends VpnService {
     public static final String BLOCKLIST_FILE = "blocklist.txt";
     /** Durée de la pause proposée par l'accueil (docs/ui-ecrans.md, A1). */
     public static final long PAUSE_MILLIS = 15 * 60 * 1000L;
-    private static final String ACTION_PAUSE = "com.akeeper.vpn.PAUSE";
-    private static final String ACTION_RESUME = "com.akeeper.vpn.RESUME";
+    static final String ACTION_PAUSE = "com.akeeper.vpn.PAUSE";
+    static final String ACTION_RESUME = "com.akeeper.vpn.RESUME";
+    // Handler sur uptimeMillis : la vérification ne réveille jamais l'appareil endormi, elle reprend au réveil.
+    private static final long WATCHDOG_MILLIS = 15_000;
 
     // Les rappels réseau de UpstreamDns arrivent sur leur propre thread : l'état du service reste au thread principal.
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -43,10 +46,12 @@ public final class ShieldVpnService extends VpnService {
     private UpstreamDns upstream;
     private NetworkStateMonitor networkStateMonitor;
     private NetworkState networkState = NetworkState.NONE;
+    private AppRules appRuleStore;
     private ShieldStatus.Subscription appRules;
     private RuleStore.Subscription ruleUpdates;
     private ShieldStatus.Subscription prefsChanges;
     private ShieldStatus.Subscription listsChanges;
+    private BroadcastReceiver packageChanges;
     private AppPrefs prefs;
     private ActivityRecorder recorder;
     private boolean lanApplied;
@@ -56,6 +61,8 @@ public final class ShieldVpnService extends VpnService {
     // Fin de la pause en horloge murale, pour l'affichage ; le moteur mesure la durée avec son horloge monotone.
     private long pausedUntil;
     private final Runnable endPause = this::endPause;
+    private final Runnable watchdog = this::watchdog;
+    private String shownStatus;
 
     /** Prérequis : {@link VpnService#prepare} a renvoyé {@code null} (consentement accordé). */
     public static void start(Context context) {
@@ -75,13 +82,15 @@ public final class ShieldVpnService extends VpnService {
     public int onStartCommand(Intent intent, int flags, int startId) {
         ShieldNotifications.createChannels(this);
         try {
-            startForeground(ShieldNotifications.STATUS_ID, ShieldNotifications.persistent(this),
+            startForeground(ShieldNotifications.STATUS_ID, ShieldNotifications.persistent(this, pausedUntil, -1),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED);
         } catch (SecurityException consentMissing) {
             // systemExempted exige le consentement VpnService.prepare() : sans lui, rien à protéger.
             stopSelf();
             return START_NOT_STICKY;
         }
+        // startForeground() vient de remettre la notification sans compteur : elle doit être republiée.
+        shownStatus = null;
         if (engine == null && !establish()) {
             shutdown();
             stopSelf();
@@ -94,8 +103,8 @@ public final class ShieldVpnService extends VpnService {
         } else if (ACTION_RESUME.equals(action)) {
             endPause();
         }
-        ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled()),
-                privateDnsStrict, pausedUntil));
+        publishRunning();
+        refreshNotification();
         return START_STICKY;
     }
 
@@ -115,11 +124,25 @@ public final class ShieldVpnService extends VpnService {
             engine.resume();
         }
         ShieldStatus.publish(ShieldStatus.current().withPausedUntil(0));
+        refreshNotification();
+    }
+
+    private void publishRunning() {
+        ShieldStatus.publish(new ShieldStatus.Snapshot(true, new LockdownStatus(isAlwaysOn(), isLockdownEnabled()),
+                privateDnsStrict, pausedUntil));
     }
 
     private boolean establish() {
+        var tun = buildTunnel();
+        return tun != null && startEngine(tun);
+    }
+
+    private ParcelFileDescriptor buildTunnel() {
         // allowBypass() et allowFamily() sont proscrits : ils ouvrent un canal de fuite hors tunnel.
         loadPrefs();
+        if (networkState.equals(NetworkState.NONE)) {
+            networkState = NetworkStateMonitor.current(getSystemService(ConnectivityManager.class));
+        }
         // Protection avancée : l'option réseau local est ignorée, quoi que dise la préférence.
         var policy = new AdvancedProtectionPolicy(this).effective(new ShieldPolicy(
                 prefs != null && prefs.settings().lanBypass() && networkState.allowsLanBypass(),
@@ -139,11 +162,11 @@ public final class ShieldVpnService extends VpnService {
                 .setMetered(false);
         // Les plages exclues ne contiennent jamais les adresses virtuelles du tunnel (voir LanRanges).
         policy.lanRoutes().forEach(builder::excludeRoute);
+        return builder.establish();
+    }
 
-        var tun = builder.establish();
-        if (tun == null) {
-            return false;
-        }
+    /** Démarre le moteur sur un tunnel déjà établi ; le fd est cédé au moteur dans tous les cas. */
+    private boolean startEngine(ParcelFileDescriptor tun) {
         var rules = RuleStore.get(this);
         try {
             engine = NativeEngine.start(tun.detachFd(), openBlocklist(), openBundle(rules), categoryMask(prefs),
@@ -175,6 +198,7 @@ public final class ShieldVpnService extends VpnService {
         networkStateMonitor = new NetworkStateMonitor(connectivity,
                 state -> main.post(() -> onNetworkState(state)));
         networkStateMonitor.start();
+        main.postDelayed(watchdog, WATCHDOG_MILLIS);
         return true;
     }
 
@@ -187,12 +211,51 @@ public final class ShieldVpnService extends VpnService {
         }
     }
 
+    /**
+     * La boucle native peut sortir seule (erreur d'epoll ou du TUN) : le tunnel resterait établi sans rien relayer,
+     * tout le trafic serait perdu et l'accueil afficherait « Protégé ». Le service le reconstruit. La même
+     * vérification suit le verrouillage, qu'Android ne notifie pas.
+     */
+    private void watchdog() {
+        if (engine == null) {
+            return;
+        }
+        if (!engine.isRunning()) {
+            // rebuild() replanifie la vérification s'il réussit.
+            rebuild();
+            return;
+        }
+        var lockdown = new LockdownStatus(isAlwaysOn(), isLockdownEnabled());
+        var previous = ShieldStatus.current().lockdown();
+        if (!lockdown.equals(previous)) {
+            if (lockdown.lockdownLostSince(previous)) {
+                ShieldNotifications.alertLockdownLost(this);
+            }
+            publishRunning();
+        }
+        refreshNotification();
+        main.postDelayed(watchdog, WATCHDOG_MILLIS);
+    }
+
+    /** Notification permanente : republiée seulement quand son contenu change. */
+    private void refreshNotification() {
+        if (engine == null) {
+            return;
+        }
+        long blocked = engine.counter(NativeEngine.Counter.DNS_BLOCKED);
+        var status = pausedUntil + ":" + blocked;
+        if (!status.equals(shownStatus)) {
+            shownStatus = status;
+            ShieldNotifications.updatePersistent(this, pausedUntil, blocked);
+        }
+    }
+
     /** Les routes d'un VPN sont fixées à l'établissement : changer l'option réseau local le reconstruit. */
     private void onLanOption(AppPrefs.Settings settings) {
         boolean wanted = settings.lanBypass() && networkState.allowsLanBypass()
                 && !new AdvancedProtectionPolicy(this).active();
         if (wanted != lanApplied && engine != null) {
-            rebuildForNetworkPolicy();
+            rebuild();
         }
     }
 
@@ -205,32 +268,56 @@ public final class ShieldVpnService extends VpnService {
         boolean wanted = settings.lanBypass() && state.allowsLanBypass()
                 && !new AdvancedProtectionPolicy(this).active();
         if (wanted != lanApplied && engine != null) {
-            rebuildForNetworkPolicy();
+            rebuild();
         }
     }
 
-    private void rebuildForNetworkPolicy() {
+    /**
+     * Le nouveau tunnel est établi avant l'arrêt de l'ancien : Android bascule l'interface d'un bloc, sans instant
+     * où le trafic sortirait hors VPN (ou serait coupé sous verrouillage). Les paquets arrivés entre-temps attendent
+     * le nouveau moteur dans la file du TUN.
+     */
+    private void rebuild() {
+        var tun = buildTunnel();
         shutdown();
-        if (!establish()) {
+        if (tun == null || !startEngine(tun)) {
             ShieldStatus.publish(ShieldStatus.Snapshot.STOPPED);
+            ShieldNotifications.alertStopped(this);
+            stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             return;
         }
-        ShieldStatus.publish(new ShieldStatus.Snapshot(true,
-                new LockdownStatus(isAlwaysOn(), isLockdownEnabled()), privateDnsStrict, pausedUntil));
+        publishRunning();
+        refreshNotification();
     }
 
     private void applyAppRules() {
         try {
-            // Moteur capturé : l'observateur tourne sur le thread de l'UI qui écrit les règles, pendant qu'un
-            // arrêt peut remettre le champ à null. Après close(), setBlockedUids() est simplement sans effet.
-            var current = engine;
-            appRules = AppRules.get(this).observe(packages ->
-                    current.setBlockedUids(AppRules.uids(getPackageManager(), packages)));
+            appRuleStore = AppRules.get(this);
         } catch (GeneralSecurityException | IOException keystoreUnavailable) {
             // Keystore indisponible : aucune règle par app, mais le filtrage DNS et l'anti-évasion restent actifs.
-            appRules = null;
+            appRuleStore = null;
+            return;
         }
+        // Moteur capturé : l'observateur tourne sur le thread de l'UI qui écrit les règles, pendant qu'un
+        // arrêt peut remettre le champ à null. Après close(), setBlockedUids() est simplement sans effet.
+        var current = engine;
+        var store = appRuleStore;
+        appRules = store.observe(packages -> current.setBlockedUids(AppRules.uids(getPackageManager(), packages)));
+        // Une app bloquée puis réinstallée reçoit un nouvel UID : sans ce recalcul, elle échapperait au pare-feu
+        // jusqu'au prochain démarrage du service.
+        packageChanges = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                current.setBlockedUids(AppRules.uids(getPackageManager(), store.blocked()));
+            }
+        };
+        var filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        filter.addDataScheme("package");
+        // Diffusions système : livrées malgré RECEIVER_NOT_EXPORTED, qui ferme le receiver aux autres apps.
+        registerReceiver(packageChanges, filter, RECEIVER_NOT_EXPORTED);
     }
 
     /** Appelé depuis le thread natif : protect() et getConnectionOwnerUid() sont sûrs hors thread principal. */
@@ -325,7 +412,9 @@ public final class ShieldVpnService extends VpnService {
 
     private void shutdown() {
         main.removeCallbacks(endPause);
+        main.removeCallbacks(watchdog);
         pausedUntil = 0;
+        shownStatus = null;
         for (var subscription : new ShieldStatus.Subscription[]{prefsChanges, listsChanges}) {
             if (subscription != null) {
                 subscription.close();
@@ -333,6 +422,10 @@ public final class ShieldVpnService extends VpnService {
         }
         prefsChanges = null;
         listsChanges = null;
+        if (packageChanges != null) {
+            unregisterReceiver(packageChanges);
+            packageChanges = null;
+        }
         if (recorder != null) {
             recorder.close();
             recorder = null;
@@ -345,6 +438,7 @@ public final class ShieldVpnService extends VpnService {
             appRules.close();
             appRules = null;
         }
+        appRuleStore = null;
         if (networkStateMonitor != null) {
             networkStateMonitor.close();
             networkStateMonitor = null;

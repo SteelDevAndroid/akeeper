@@ -122,6 +122,16 @@ Pas encore livrés :
 - **Réseau local (R1)** : interrupteur désactivé par défaut avec avertissement, verrouillé sous Protection avancée. Les plages privées sont exclues du tunnel **sauf** `10.111.0.0/16` et `fd00:6d73::/32` (DNS virtuel), calculé par `LanRanges`. Les routes étant fixées à l'établissement, le service reconstruit le tunnel au changement : coupure brève. Non essayé sur appareil.
 - **Non essayé sur appareil** : l'ouverture de la base SQLCipher et son chiffrement (les tests JVM n'ont pas la bibliothèque native). Les `.so` de SQLCipher sont alignés 16 KB (`scripts/check-16kb.sh`).
 
+**Fiabilité du service et intégration hors app (J6, partie 1)** :
+- **Surveillance du moteur** : si la boucle native sort (erreur d'epoll ou du TUN), le tunnel restait établi sans rien relayer, sous l'état « Protégé ». `nativeIsRunning` l'expose ; le service vérifie toutes les 15 s (sans réveiller l'appareil) et reconstruit le tunnel, ou s'arrête avec une alerte « Protection arrêtée ».
+- **Reconstruction sans coupure** : le nouveau tunnel est établi avant l'arrêt de l'ancien moteur (option réseau local, changement de réseau, redémarrage du moteur). Le premier tunnel part de l'état du réseau actif, ce qui évite une reconstruction au démarrage.
+- **Verrouillage** : suivi par la même vérification, l'accueil se met à jour et une alerte part quand il est désactivé.
+- **Pare-feu par app** : les UID sont recalculés à chaque installation ou désinstallation d'app.
+- **Notification permanente** : compteur de requêtes bloquées depuis le démarrage (pas « aujourd'hui » : ce chiffre exigerait le journal) et action **Pause 15 min** / **Reprendre**.
+- **Tuile Réglages rapides** : Protégé / En pause / Arrêté ; un appui bascule la pause, ou ouvre l'app si la protection est arrêtée ; un appui long ouvre l'accueil.
+- **CI** : l'APK est construit avec les variables `RULES_PUBLIC_KEYS`, `RULES_URL` et `MIN_RULE_VERSION` du dépôt et signé si les secrets `RELEASE_*` existent.
+- **Non essayé sur appareil** : rien de ce qui précède, faute d'émulateur.
+
 Restent pour J5 :
 - **Déploiement propriétaire du serveur de règles** : renseigner les secrets/variables du dépôt cible, activer GitHub Pages et configurer `akeeper.rulesUrl`. Sans cette URL, rien n'est planifié côté appareil.
 - **Pinning TLS** du serveur de règles.

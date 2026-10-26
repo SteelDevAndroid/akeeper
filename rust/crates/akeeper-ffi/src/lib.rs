@@ -365,6 +365,23 @@ fn set_nonblocking(fd: &OwnedFd) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 1 tant que la boucle du moteur tourne, 0 une fois sortie (TUN fermé, erreur d'epoll) ou pour un handle nul.
+///
+/// # Safety
+/// `handle` vient de `nativeStart` et n'a pas encore été passé à `nativeStop` (garanti par le verrou Java).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_com_akeeper_engine_NativeEngine_nativeIsRunning(
+    _env: *mut JniEnv,
+    _class: *mut JClass,
+    handle: JLong,
+) -> JInt {
+    // SAFETY: contrat de la fonction ; lecture seule via &Engine.
+    let Some(engine) = (unsafe { (handle as *const Engine).as_ref() }) else {
+        return 0;
+    };
+    JInt::from(engine.is_running())
+}
+
 /// Renvoie -1 pour un handle nul ou un compteur inconnu.
 ///
 /// # Safety
@@ -524,6 +541,13 @@ mod tests {
         }
     }
 
+    fn is_running(handle: JLong) -> JInt {
+        // SAFETY: les tests n'appellent is_running qu'avec 0 ou un handle pas encore arrêté.
+        unsafe {
+            Java_com_akeeper_engine_NativeEngine_nativeIsRunning(null_mut(), null_mut(), handle)
+        }
+    }
+
     fn stop(handle: JLong) {
         // SAFETY: les tests arrêtent chaque handle une seule fois (0 est accepté).
         unsafe { Java_com_akeeper_engine_NativeEngine_nativeStop(null_mut(), null_mut(), handle) }
@@ -548,6 +572,22 @@ mod tests {
         let rejected = UdpSocket::bind("127.0.0.1:0").unwrap();
         assert_eq!(set_upstream(handle, 4, rejected.into_raw_fd()), -1);
         assert_eq!(set_upstream(handle, -1, -1), -1);
+        stop(handle);
+    }
+
+    #[test]
+    fn reports_the_loop_exit() {
+        // Un pipe signale la fermeture par une lecture de 0 octet, comme le TUN révoqué.
+        let (reader, writer) = std::io::pipe().unwrap();
+        let handle = start_with(OwnedFd::from(reader), None);
+        assert_eq!(is_running(handle), 1);
+        drop(writer);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while is_running(handle) == 1 {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(is_running(0), 0);
         stop(handle);
     }
 

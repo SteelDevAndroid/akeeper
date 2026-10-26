@@ -153,8 +153,16 @@ class NativeEngineJniTest {
     }
 
     @Test
+    void reportsTheLoopExitWhenTheTunnelCloses() throws Exception {
+        assertThat(engine.isRunning()).isTrue();
+        app.close();
+        await(() -> !engine.isRunning());
+    }
+
+    @Test
     void ignoresCallsOnceClosed() {
         engine.close();
+        assertThat(engine.isRunning()).isFalse();
         assertThat(engine.pause(1_000)).isFalse();
         assertThat(engine.resume()).isFalse();
         assertThat(engine.counter(NativeEngine.Counter.PACKETS)).isEqualTo(-1);
