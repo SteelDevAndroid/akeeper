@@ -115,10 +115,11 @@ cargo run -p akeeper-bundle -- verify bundle.akrb <clé0 hex> <clé1 hex>
    - variable `RULES_KEY_ID` : `0` ou `1`, la position de la clé qui signe.
 3. Settings › Pages › Source : **GitHub Actions**, puis lancer le workflow `rules` à la main une première fois.
 4. Variable de dépôt `RULES_URL=https://<compte>.github.io/<dépôt>/bundle.akrb` (et `MIN_RULE_VERSION`, relevée à chaque release) : la CI les passe à Gradle avec `RULES_PUBLIC_KEYS`, donc **les mêmes clés** que le pipeline. Un build local les reçoit par `gradle.properties` (`akeeper.rulePublicKeys`, `akeeper.rulesUrl`, `akeeper.minRuleVersion`). Sans les clés, l'app n'accepte aucun bundle ; avec d'autres clés, elle les refuse tous.
-5. Archiver l'accord d'abuse.ch avant d'activer la catégorie malware.
+5. Pinning TLS : depuis un réseau sans proxy d'inspection, `scripts/rules-pins.sh <compte>.github.io`, puis variables `RULES_PINS` (empreintes de l'intermédiaire **et** de la racine, séparées par une virgule) et `RULES_PINS_EXPIRATION` (par exemple un an plus tard). À la rotation de CA annoncée par l'hébergeur, ajouter la nouvelle empreinte dans une version de l'app **avant** la bascule.
+6. Archiver l'accord d'abuse.ch avant d'activer la catégorie malware.
 
 ## Pas encore fait
 
 - **Serveur** : le pipeline existe, mais il n'est pas activé tant que les étapes ci-dessus ne sont pas faites. Sans `akeeper.rulesUrl`, la mise à jour n'est pas planifiée.
-- **Pinning TLS** du serveur (spec §5) : il viendra avec les vrais certificats. L'intégrité repose sur Ed25519, pas sur TLS.
+- **Pinning TLS** du serveur (spec §5) : en place dès que `RULES_PINS` est renseigné (étape 5). L'intégrité repose sur Ed25519, pas sur TLS.
 - **Bundle embarqué** dans l'APK pour le premier démarrage : il faut d'abord la clé de production.

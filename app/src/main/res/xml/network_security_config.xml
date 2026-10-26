@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Pin-set du serveur de règles (spec §5) : ajouté quand le serveur et ses certificats existeront. L'intégrité des règles repose sur Ed25519, pas sur TLS. -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false">
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </base-config>
-</network-security-config>
