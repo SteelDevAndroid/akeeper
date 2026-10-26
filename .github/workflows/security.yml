@@ -59,7 +59,8 @@ jobs:
           build-mode: manual
       - uses: gradle/actions/setup-gradle@v4
       - name: Compile Java and Kotlin for CodeQL
-        run: ./gradlew :app:compileDebugJavaWithJavac :vpn:compileDebugJavaWithJavac :rules:compileDebugJavaWithJavac :engine:compileDebugJavaWithJavac
+        # --rerun-tasks : une compilation servie par le cache de build échappe au traceur CodeQL (« no source code seen »).
+        run: ./gradlew --rerun-tasks :app:compileDebugJavaWithJavac :vpn:compileDebugJavaWithJavac :rules:compileDebugJavaWithJavac :engine:compileDebugJavaWithJavac
       - uses: github/codeql-action/analyze@v4
 
   codeql-rust:
