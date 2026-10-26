@@ -2,6 +2,37 @@ plugins {
     id("akeeper.android-application")
 }
 
+// Pinning TLS du serveur de règles : mêmes propriétés que :rules pour l'URL, empreintes SPKI (scripts/rules-pins.sh).
+val rulesUrl = providers.gradleProperty("akeeper.rulesUrl").getOrElse("")
+val rulesPins = providers.gradleProperty("akeeper.rulesPins").getOrElse("")
+    .split(',').map(String::trim).filter(String::isNotEmpty)
+val rulesPinsExpiration = providers.gradleProperty("akeeper.rulesPinsExpiration").getOrElse("")
+val rulesHost = Regex("https://([A-Za-z0-9.-]+)(:[0-9]+)?(/.*)?").matchEntire(rulesUrl)?.groupValues?.get(1).orEmpty()
+
+// Valeurs écrites dans un XML : validées pour qu'aucune propriété ne puisse y injecter de balise.
+require(rulesPins.all { Regex("[A-Za-z0-9+/]{43}=").matches(it) }) {
+    "akeeper.rulesPins : empreintes SHA-256 en base64 (44 caractères), séparées par une virgule"
+}
+require(rulesPins.isEmpty() || (rulesHost.isNotEmpty() && rulesPins.size >= 2)) {
+    "akeeper.rulesPins : exige akeeper.rulesUrl et au moins deux empreintes (dont une de secours)"
+}
+require(rulesPins.isEmpty() || Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(rulesPinsExpiration)) {
+    "akeeper.rulesPinsExpiration : date AAAA-MM-JJ, obligatoire avec akeeper.rulesPins"
+}
+
+val networkSecurityConfig = tasks.register<NetworkSecurityConfig>("networkSecurityConfig") {
+    host.set(rulesHost)
+    pins.set(rulesPins)
+    expiration.set(rulesPinsExpiration)
+    outputDir.set(layout.buildDirectory.dir("generated/res/networkSecurityConfig"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.res?.addGeneratedSourceDirectory(networkSecurityConfig, NetworkSecurityConfig::outputDir)
+    }
+}
+
 android {
     namespace = "com.akeeper"
 

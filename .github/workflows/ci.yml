@@ -64,11 +64,15 @@ jobs:
           RULE_PUBLIC_KEYS: ${{ vars.RULES_PUBLIC_KEYS }}
           RULES_URL: ${{ vars.RULES_URL }}
           MIN_RULE_VERSION: ${{ vars.MIN_RULE_VERSION || '0' }}
+          RULES_PINS: ${{ vars.RULES_PINS }}
+          RULES_PINS_EXPIRATION: ${{ vars.RULES_PINS_EXPIRATION }}
         run: >-
           ./gradlew check :app:assembleRelease :app:assembleDebug :app:bundleRelease
           "-Pakeeper.rulePublicKeys=$RULE_PUBLIC_KEYS"
           "-Pakeeper.rulesUrl=$RULES_URL"
           "-Pakeeper.minRuleVersion=$MIN_RULE_VERSION"
+          "-Pakeeper.rulesPins=$RULES_PINS"
+          "-Pakeeper.rulesPinsExpiration=$RULES_PINS_EXPIRATION"
       - run: scripts/check-16kb.sh app/build/outputs/apk/release/app-release*.apk
       # APK debug (signé avec la clé de debug) : seul installable pour valider sur appareil. Release non signée.
       - uses: actions/upload-artifact@v4

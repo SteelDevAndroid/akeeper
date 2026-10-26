@@ -138,9 +138,10 @@ Pas encore livrés :
 - **O1** : la divulgation cite la liste des apps installées et le téléchargement des listes. Son bouton devient **Accepter et continuer** (consentement explicite exigé par Play).
 - **Risque principal** : `QUERY_ALL_PACKAGES`. Un pare-feu par app n'est pas cité parmi les usages admis ; le repli (`<queries>` LAUNCHER) est décrit dans le dossier.
 
+**Pinning TLS du serveur de règles** : `network_security_config.xml` est généré au build. Avec `akeeper.rulesPins` (au moins deux empreintes SPKI SHA-256, dont une de secours) et `akeeper.rulesPinsExpiration`, il ajoute un `<pin-set>` pour l'hôte de `akeeper.rulesUrl`. Android vérifie les empreintes sur la chaîne validée, racine comprise ; après la date d'expiration, il n'applique plus les pins, ce qui évite qu'une ancienne version perde les mises à jour. `scripts/rules-pins.sh` calcule les empreintes des intermédiaires et de la racine. Il faut les épingler, pas la feuille, renouvelée tous les quelques mois. L'authenticité des règles reste assurée par Ed25519 : le pinning empêche seulement un intermédiaire réseau de bloquer ou de rejouer les mises à jour avec un certificat d'une autre CA.
+
 Restent pour J5 :
 - **Déploiement propriétaire du serveur de règles** : renseigner les secrets/variables du dépôt cible, activer GitHub Pages et configurer `akeeper.rulesUrl`. Sans cette URL, rien n'est planifié côté appareil.
-- **Pinning TLS** du serveur de règles.
 - **Validation de production** du bundle signé et de la rotation de clé sur le dépôt cible.
 
 Les extraits de code ci-dessous restent la cible. Le code du dépôt fait foi pour l'état courant.
