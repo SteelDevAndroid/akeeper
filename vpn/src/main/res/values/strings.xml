@@ -11,4 +11,21 @@
     <string name="alert_revoked_text">Touchez pour réactiver.</string>
     <string name="alert_private_dns_title">Le DNS privé empêche le filtrage des sites</string>
     <string name="alert_private_dns_text">Touchez pour voir comment le corriger.</string>
+    <string name="status_paused">En pause</string>
+    <string name="status_paused_until">Reprise à %1$s</string>
+    <plurals name="status_blocked">
+        <item quantity="one">%1$d requête bloquée depuis le démarrage</item>
+        <item quantity="many">%1$d requêtes bloquées depuis le démarrage</item>
+        <item quantity="other">%1$d requêtes bloquées depuis le démarrage</item>
+    </plurals>
+    <string name="action_pause">Pause 15 min</string>
+    <string name="action_resume">Reprendre</string>
+    <string name="alert_stopped_title">Protection arrêtée</string>
+    <string name="alert_stopped_text">Le filtrage s\'est arrêté de façon inattendue. Touchez pour redémarrer.</string>
+    <string name="alert_lockdown_title">Verrouillage désactivé</string>
+    <string name="alert_lockdown_text">Les apps peuvent sortir sans filtrage si aKeeper s\'arrête. Touchez pour le réactiver.</string>
+    <string name="tile_label">aKeeper</string>
+    <string name="tile_protected">Protégé</string>
+    <string name="tile_paused">En pause</string>
+    <string name="tile_stopped">Arrêté</string>
 </resources>

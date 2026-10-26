@@ -62,6 +62,19 @@ final class NetworkStateMonitor extends ConnectivityManager.NetworkCallback impl
         thread.quitSafely();
     }
 
+    /**
+     * État du réseau par défaut, lu sans attendre le premier rappel : sans lui, le premier tunnel serait établi
+     * avec {@link NetworkState#NONE}, puis reconstruit dès ce rappel. Un VPN déjà actif (le nôtre ou un autre) ne
+     * renseigne pas sur le réseau physique : {@code NONE}, le choix le plus prudent.
+     */
+    static NetworkState current(ConnectivityManager connectivity) {
+        var capabilities = connectivity.getNetworkCapabilities(connectivity.getActiveNetwork());
+        if (capabilities == null || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+            return NetworkState.NONE;
+        }
+        return from(capabilities);
+    }
+
     static NetworkState from(NetworkCapabilities capabilities) {
         NetworkState.Transport transport = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
                 ? NetworkState.Transport.WIFI

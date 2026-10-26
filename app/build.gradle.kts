@@ -30,6 +30,18 @@ android {
         )
     }
 
+    // Clé de release fournie par la CI (secrets) : jamais dans le dépôt. Sans elle, l'APK release reste non signé.
+    val keystore = providers.environmentVariable("AKEEPER_KEYSTORE").orNull
+    if (keystore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = providers.environmentVariable("AKEEPER_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("AKEEPER_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("AKEEPER_KEY_PASSWORD").get()
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("release")
+    }
+
     packaging {
         // .so non compressées et alignées 16 KB : exigence Play.
         jniLibs.useLegacyPackaging = false

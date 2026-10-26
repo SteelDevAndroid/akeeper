@@ -47,8 +47,29 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - run: cargo install cargo-ndk --locked
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew check :app:assembleRelease :app:assembleDebug
-      - run: scripts/check-16kb.sh app/build/outputs/apk/release/app-release-unsigned.apk
+      # Clé de release : décodée seulement si le secret existe (absent sur les PR de fork). L'APK reste sinon non signé.
+      - name: Release keystore
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_B64" ]; then
+            printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "AKEEPER_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
+      # Mêmes clés publiques que le pipeline de règles (rules.yml) : un APK sans elles n'accepte aucun bundle.
+      - env:
+          AKEEPER_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          AKEEPER_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          AKEEPER_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RULE_PUBLIC_KEYS: ${{ vars.RULES_PUBLIC_KEYS }}
+          RULES_URL: ${{ vars.RULES_URL }}
+          MIN_RULE_VERSION: ${{ vars.MIN_RULE_VERSION || '0' }}
+        run: >-
+          ./gradlew check :app:assembleRelease :app:assembleDebug
+          "-Pakeeper.rulePublicKeys=$RULE_PUBLIC_KEYS"
+          "-Pakeeper.rulesUrl=$RULES_URL"
+          "-Pakeeper.minRuleVersion=$MIN_RULE_VERSION"
+      - run: scripts/check-16kb.sh app/build/outputs/apk/release/app-release*.apk
       # APK debug (signé avec la clé de debug) : seul installable pour valider sur appareil. Release non signée.
       - uses: actions/upload-artifact@v4
         with:
@@ -56,7 +77,7 @@ jobs:
           name: akeeper-apk-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/app-release*.apk
           if-no-files-found: error
           retention-days: 14
 
